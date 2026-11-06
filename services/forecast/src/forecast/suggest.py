@@ -198,13 +198,17 @@ def build(d: Data | None = None) -> dict:
             "confidence_table": {f"{k[0]}|{'ly' if k[1] else 'no_ly'}": v for k, v in conf_table.items()}}
 
 
-def evaluation_json(d: Data) -> dict:
+def evaluation_json(d: Data, forecasts: list[dict] | None = None) -> dict:
     from .backtest import run
     from .models import REGISTRY
     res = run(REGISTRY, d)
+    n_date = sum(1 for f in forecasts or [] if f["PREDICTED_DEPLETION_DATE"])
+    coverage = {"pairs": len(forecasts or []), "targets": int(len(d.targets)), "with_date": n_date,
+                "blank": len(forecasts or []) - n_date}
     mean = res.groupby("model", sort=False)[["mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"]].mean().round(3)
     return {"source": "local_backtest (proxy truth = επόμενη αγορά· βλ. docs/RESULTS.md)",
-            "cutoffs": [str(c.date()) for c in CUTOFFS], "default_model": DEFAULT_MODEL,
+            "cutoffs": [str(c.date()) for c in CUTOFFS], "default_model": DEFAULT_MODEL, "coverage": coverage,
+            "readme_reference": {"cutoff+30": 18.3, "baseline_180": 16.1},
             "rows": [{"model": m, **{k: (None if pd.isna(v) else float(v)) for k, v in r.items()}} for m, r in mean.iterrows()],
             "per_cutoff": json.loads(res.assign(cutoff=res["cutoff"].astype(str)).to_json(orient="records"))}
 
@@ -216,7 +220,7 @@ def main() -> None:
     dump = lambda name, obj: (PROCESSED / name).write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
     dump("suggestions.json", {"suggestions": out["suggestions"]})
     dump("forecasts.json", {"forecasts": out["forecasts"], "confidence_table": out["confidence_table"]})
-    dump("evaluation.json", evaluation_json(d))
+    dump("evaluation.json", evaluation_json(d, out["forecasts"]))
     s = out["suggestions"]
     print(f"{len(s)} suggestions, {sum(len(x['LINES']) for x in s)} lines; urgency:",
           pd.Series([x["urgency"] for x in s]).value_counts().to_dict())

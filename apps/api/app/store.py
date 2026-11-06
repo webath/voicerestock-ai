@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -20,6 +22,7 @@ CREATE TABLE IF NOT EXISTS suggestions (id TEXT PRIMARY KEY, body TEXT NOT NULL)
 CREATE TABLE IF NOT EXISTS tokens (token TEXT PRIMARY KEY, suggestion_id TEXT NOT NULL, version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS idempotency (key TEXT PRIMARY KEY, response TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS calls (call_sid TEXT PRIMARY KEY, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, actor TEXT, action TEXT,
                                   suggestion_id TEXT, outcome TEXT, correlation_id TEXT);
 """
@@ -36,10 +39,17 @@ class Store:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(db_path, check_same_thread=False)
         self.db.executescript(SCHEMA)
-        if not self.db.execute("SELECT 1 FROM suggestions LIMIT 1").fetchone():
+        # Νέο τρέξιμο του forecast (άλλο suggestions.json) → οι παλιές προτάσεις δεν ισχύουν πια.
+        stored = self.db.execute("SELECT value FROM meta WHERE key = 'seed_hash'").fetchone()
+        if stored is None or stored[0] != self._seed_hash():
+            if stored is not None:
+                logging.getLogger("store").info("suggestions.json changed → reloading proposals")
             self.reset()
 
     # ---- lifecycle ----
+    def _seed_hash(self) -> str:
+        return hashlib.sha256(self.seed_path.read_bytes()).hexdigest()
+
     def reset(self) -> int:
         """Ξαναφορτώνει τις προτάσεις από το forecast και σβήνει state (για «Run demo scenario»)."""
         sugs = json.loads(self.seed_path.read_text(encoding="utf-8"))["suggestions"]
@@ -48,6 +58,7 @@ class Store:
                 self.db.execute(f"DELETE FROM {t}")
             self.db.executemany("INSERT INTO suggestions VALUES (?, ?)",
                                 [(s["id"], json.dumps(s, ensure_ascii=False)) for s in sugs])
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES ('seed_hash', ?)", (self._seed_hash(),))
         return len(sugs)
 
     # ---- suggestions ----

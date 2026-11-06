@@ -21,8 +21,8 @@
 
 | Developer | Φάκελοι που γράφει |
 |---|---|
-| Δημήτρης (data & backend) | `services/forecast/`, `apps/api/`, `submissions/`, `docs/RESULTS.md` |
-| Νίκος (dashboard & voice) | `apps/web/`, `apps/voice/`, `scripts/mock_app_api.py` |
+| Δημήτρης (data & backend) | `services/forecast/`, `apps/api/`, `submissions/`, `docs/RESULTS.md`, και στο web: `apps/web/app/evaluation/`, `apps/web/app/customers/`, `apps/web/components/charts/` |
+| Νίκος (dashboard & voice) | `apps/web/` (όλα τα υπόλοιπα), `apps/voice/`, `scripts/mock_app_api.py` |
 | Κοινά (μόνο με συνεννόηση) | `docs/CONTRACTS.md`, `fixtures/`, `docs/PLAN.md` (checkboxes ελεύθερα), `docs/DEMO.md`, `README.md` |
 
 Αν μια αλλαγή χρειάζεται να αγγίξει φάκελο του άλλου ή τα contracts: **σταμάτα και πες το στον χρήστη** αντί να το κάνεις.

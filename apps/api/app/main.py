@@ -122,6 +122,17 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> Fas
         rows.sort(key=lambda r: (r["PREDICTED_DEPLETION_DATE"], -r["CONFIDENCE"]))
         return rows[:limit]
 
+    @app.get("/api/customers")
+    def customers():
+        return [_customer_out(c) for c in _customers().values()]
+
+    @app.get("/api/customers/{trdr}")
+    def customer(trdr: int):
+        c = _customers().get(trdr)
+        if not c:
+            raise ApiError(404, "not_found", "customer not found")
+        return _customer_out(c)
+
     @app.get("/api/forecasts")
     def forecasts(trdr: int):
         return [f for f in _forecasts() if f["TRDR"] == trdr]
@@ -260,6 +271,20 @@ def _daily() -> pd.DataFrame:
 def _customers() -> dict[int, dict]:
     df = pd.read_csv(ROOT / "team_pack" / "data" / "TRDR.csv", encoding="utf-8-sig")
     return {int(r["TRDR"]): r for r in df.to_dict("records")}
+
+
+def _customer_out(c: dict) -> dict:
+    names = _salesman_names()
+    return {"TRDR": int(c["TRDR"]), "CODE": c["CODE"], "NAME": c["NAME"], "TRDCATEGORY": c["TRDCATEGORY"],
+            "AREA": c["AREA"], "CITY": c["CITY"], "SALESMAN": int(c["SALESMAN"]),
+            "SALESMAN_NAME": names.get(int(c["SALESMAN"])), "INSDATE": c["INSDATE"],
+            "cold_start": c["INSDATE"] >= "2026-01-01"}
+
+
+@lru_cache
+def _salesman_names() -> dict[int, str]:
+    df = pd.read_csv(ROOT / "team_pack" / "data" / "PRSN.csv", encoding="utf-8-sig")
+    return dict(zip(df["PRSN"].astype(int), df["NAME"]))
 
 
 @lru_cache

@@ -38,7 +38,8 @@
 | App API (suggestions, quantity, confirm, create-draft, history, evaluation, calls, audit) | **Δημήτρης** | `apps/api/` |
 | LLM εξηγήσεις για το dashboard (grounded σε evidence) | **Δημήτρης** | `apps/api/` (`/explanation`) |
 | Αποτελέσματα backtest | **Δημήτρης** | `docs/RESULTS.md` |
-| Dashboard: Overview, At Risk, Customer, Suggested Orders, Evaluation, Voice Ops | **Νίκος** | `apps/web/` |
+| Dashboard: Overview, At Risk, Suggested Orders, Voice Ops | **Νίκος** | `apps/web/` |
+| Dashboard: Πελάτες + Πελάτης, Αξιολόγηση (έτοιμες) | **Δημήτρης** | `apps/web/app/customers/`, `apps/web/app/evaluation/` |
 | Voice agent (Twilio, WS, STT/TTS, LLM dialogue, tools, state machine) | **Νίκος** | `apps/voice/` |
 | Mock App API (κρατιέται ίδιο με τα contracts) | **Νίκος** | `scripts/mock_app_api.py` |
 | Contracts (σχήματα JSON, endpoints) | **κοινό** — αλλαγή μόνο με PR & ok και από τους δύο | `docs/CONTRACTS.md`, `fixtures/` |
@@ -65,7 +66,7 @@
 - [ ] Twilio λογαριασμός + αριθμός + **verified caller ID** του κινητού του (trial κλήσεις πάνε μόνο σε verified αριθμούς) + Geo permissions για Ελλάδα
 - [ ] **Spike (το πιο ρισκαρισμένο κομμάτι όλου του project):** πραγματική εξερχόμενη κλήση στο κινητό με ConversationRelay, `language=el-GR`, που απλά απαντά «γεια». Επιβεβαίωση ότι STT και TTS δουλεύουν στα ελληνικά
 - [ ] Αν το Greek ConversationRelay δεν δουλεύει μέσα σε ~2 ώρες → Plan B (βλ. `docs/VOICE.md`)
-- [ ] `apps/web`: `create-next-app`, layout, πλοήγηση, client για το App API
+- [x] `apps/web`: Next.js 16, layout, πλοήγηση, client για το App API (`lib/api.ts`) — έτοιμο από τον Δημήτρη
 
 ### Φάση 1 — Πρώτο submission & βάσεις (Παρ 21:00–02:00)
 
@@ -110,7 +111,8 @@
 - [ ] Συνέχεια στο μοντέλο (το MAE είναι 30% του βαθμού)
 
 **Νίκος**
-- [ ] Σελίδες **Customer detail** (timeline αγορών + forecast + factors + εξήγηση), **Evaluation** (baseline vs μοντέλο), **Overview**
+- [x] Σελίδες **Customer detail** και **Evaluation** — τις έκανε ο Δημήτρης (`/customers`, `/customers/[trdr]`, `/evaluation`)
+- [ ] Σελίδα **Overview**
 - [ ] Σελίδα **Voice Operations** (ουρά κλήσεων, status, transcript, draft id) + κουμπί «Κάλεσε τον πωλητή»
 - [ ] Voice edge cases: voicemail, κλείσιμο γραμμής, «15» vs «50», διπλό webhook → **ποτέ** διπλό draft· allowlist, quiet hours, AI disclosure
 

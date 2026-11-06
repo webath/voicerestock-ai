@@ -143,9 +143,11 @@ proposed|modified ──▶ cancelled
 | POST | `/api/suggestions/{id}/create-draft` | `{"confirmation_token": "...", "idempotency_key": "..."}` | `{"erp_draft_id": "DRAFT-...", "status": "draft_created"}` |
 | POST | `/api/suggestions/{id}/cancel` | `{}` | `Suggestion` |
 | GET | `/api/forecasts?trdr=1004` | – | `[{TRDR, MTRL, ITEM_NAME, CATEGORY, PREDICTED_DEPLETION_DATE, days_left, CONFIDENCE, urgency}]` (`urgency: "none"` = καμία εξάντληση σε 90 μέρες) — όλα τα target ζεύγη του πελάτη (και όχι-at-risk) |
+| GET | `/api/customers` | – | `[{TRDR, CODE, NAME, TRDCATEGORY, AREA, CITY, SALESMAN, SALESMAN_NAME, INSDATE, cold_start}]` (140) |
+| GET | `/api/customers/{trdr}` | – | ένας πελάτης, ίδιο σχήμα |
 | GET | `/api/customers/{trdr}/history?mtrl=5016` | – | `{"TRDR", "items": [{"MTRL", "ITEM_NAME", "points": [{"date": "2026-10-24", "qty": 4}]}]}` — καθαρή ποσότητα ανά μέρα (πιστωτικά αρνητικά, χωρίς ακυρωμένα/μεταφορικά). `mtrl` προαιρετικό |
 | GET | `/api/suggestions/{id}/explanation` | – | `{"text": "...", "source": "llm"\|"template", "model": "...", "grounded_on": [...]}` — ελληνική εξήγηση **μόνο** από το evidence |
-| GET | `/api/evaluation` | – | `{"source": "local_backtest", "cutoffs": [...], "rows": [{"model", "mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"}]}` |
+| GET | `/api/evaluation` | – | `{"source", "cutoffs", "default_model", "coverage": {"pairs", "targets", "with_date", "blank"}, "readme_reference": {...}, "rows": [{"model", "mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"}], "per_cutoff": [...]}` |
 | POST | `/api/calls/events` | `{"call_sid","type","status?","text?","role?","suggestion_id?","erp_draft_id?"}` | `{"ok": true}` — το Voice στέλνει εδώ ό,τι συμβαίνει |
 | GET | `/api/calls` | – | `Call[]` (πιο πρόσφατη πρώτη) |
 | GET | `/api/audit?limit=200` | – | `[{at, actor, action, suggestion_id, outcome}]` |
