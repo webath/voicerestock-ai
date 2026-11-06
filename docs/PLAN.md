@@ -86,14 +86,15 @@
 - [ ] Μοντέλο v2: ανακατασκευή αποθέματος από τον κύκλο αγορών (βλ. «Ιδέες αλγορίθμου» παρακάτω)
 - [x] Εποχικότητα (`seasonal_yoy` + `hybrid_0.6`, MAE backtest 3,78)
 - [ ] Αργίες, προσφορές Νοε–Δεκ, cold start από peers — κάθε βελτίωση στο backtest, γραμμή στο `docs/RESULTS.md`
-- [ ] `suggest.py`: Suggested Order ανά πελάτη (εργάσιμη παράδοση πριν την εξάντληση, ποσότητα, όρια, confidence, evidence) → `data/processed/suggestions.json` στο σχήμα του fixture
-- [ ] `apps/api` (FastAPI): όλα τα endpoints του `docs/CONTRACTS.md` με την ίδια συμπεριφορά με το mock (versions, tokens, idempotency), SQLite για state/audit
+- [x] `suggest.py`: Suggested Order ανά πελάτη (εργάσιμη παράδοση πριν την εξάντληση, ποσότητα, όρια, confidence, evidence) → `data/processed/suggestions.json` στο σχήμα του fixture
+- [x] `apps/api` (FastAPI): όλα τα endpoints του `docs/CONTRACTS.md` με την ίδια συμπεριφορά με το mock (versions, tokens, idempotency), SQLite για state/audit
 
 **Νίκος**
 - [ ] Σελίδα **Suggested Orders**: αλλαγή ποσότητας, «Έγκριση» (confirm → create-draft) → δείχνει το ERP draft id
 - [ ] Voice: όλα τα tools, state machine κλήσης, διπλή προφορική επιβεβαίωση, εξήγηση **μόνο** από το `evidence`
 
 ### 🔗 Checkpoint integration (Σαβ 14:00)
+> ✅ Το πραγματικό API είναι έτοιμο από Παρασκευή βράδυ: `./scripts/dev_backend.sh` (pipeline + ERP :8080 + API :8000). Ο Νίκος μπορεί να αλλάξει από το mock όποτε θέλει.
 - Ο Δημήτρης έχει το πραγματικό API στο `:8000` με τα ίδια σχήματα με το fixture
 - Ο Νίκος σταματάει το mock → dashboard και voice δουλεύουν με πραγματικές προβλέψεις
 - End-to-end: έγκριση από dashboard **και** από κλήση → `team_pack/draft_orders/DRAFT-*.json`
@@ -101,9 +102,10 @@
 ### Φάση 3 — Ολοκλήρωση & σταθεροποίηση (Σαβ 14:00–22:00)
 
 **Δημήτρης**
-- [ ] `GET /api/suggestions/{id}/explanation`: ελληνική εξήγηση από LLM, grounded στο evidence
-- [ ] `GET /api/customers/{trdr}/history` και `GET /api/evaluation` με πραγματικά δεδομένα
-- [ ] Συνέχεια στο μοντέλο (το MAE είναι 30% του βαθμού) + integration tests του API (διπλό create-draft, λάθος version, εκτός ορίων)
+- [x] `GET /api/suggestions/{id}/explanation`: ελληνική εξήγηση από LLM, grounded στο evidence
+- [x] `GET /api/customers/{trdr}/history` και `GET /api/evaluation` με πραγματικά δεδομένα
+- [x] Integration tests του API (διπλό create-draft, λάθος version, εκτός ορίων, αποτυχία ERP)
+- [ ] Συνέχεια στο μοντέλο (το MAE είναι 30% του βαθμού)
 
 **Νίκος**
 - [ ] Σελίδες **Customer detail** (timeline αγορών + forecast + factors + εξήγηση), **Evaluation** (baseline vs μοντέλο), **Overview**

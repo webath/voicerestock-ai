@@ -1,0 +1,129 @@
+import json
+import shutil
+
+import pytest
+from fastapi.testclient import TestClient
+
+import os
+os.environ["VR_NO_AUTOAPP"] = "1"
+from app import explain as explain_mod  # noqa: E402
+from app.main import create_app  # noqa: E402
+from app.store import PROCESSED, Store  # noqa: E402
+
+
+class FakeERP:
+    def __init__(self, fail=False):
+        self.calls, self.fail = [], fail
+
+    def create_draft(self, payload):
+        self.calls.append(payload)
+        if self.fail:
+            return 502, {"errors": ["down"]}
+        return 201, {"id": f"DRAFT-TEST-{len(self.calls):04d}", "status": "DRAFT"}
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    seed = tmp_path / "suggestions.json"
+    shutil.copy(PROCESSED / "suggestions.json", seed)
+    erp = FakeERP()
+    monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
+    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), erp))
+    sid = c.get("/api/suggestions").json()[0]["id"]
+    return c, erp, sid
+
+
+def first_line(c, sid):
+    s = c.get(f"/api/suggestions/{sid}").json()
+    return s, s["LINES"][0]
+
+
+def test_full_flow_creates_exactly_one_draft(env):
+    c, erp, sid = env
+    s, l = first_line(c, sid)
+    r = c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": l["QTY_MAX"], "version": 1},
+               headers={"X-Actor": "voice:CA1"})
+    assert r.status_code == 200 and r.json()["version"] == 2 and r.json()["status"] == "modified"
+    tok = c.post(f"/api/suggestions/{sid}/confirm", json={"version": 2}).json()["confirmation_token"]
+    body = {"confirmation_token": tok, "idempotency_key": f"CA1:{sid}:2"}
+    r1 = c.post(f"/api/suggestions/{sid}/create-draft", json=body)
+    r2 = c.post(f"/api/suggestions/{sid}/create-draft", json=body)
+    assert r1.status_code == 200 and r1.json() == r2.json()
+    assert len(erp.calls) == 1
+    sent = erp.calls[0]
+    assert set(sent) == {"TRDR", "CUSTOMER_CODE", "SALESMAN", "SUGGESTED_DELIVERY_DATE", "REASON", "LINES"}
+    assert sent["LINES"][0]["QTY1"] == l["QTY_MAX"]
+    assert c.get(f"/api/suggestions/{sid}").json()["status"] == "draft_created"
+    # άλλο idempotency key μετά το draft → ίδιο draft, όχι νέο write
+    r3 = c.post(f"/api/suggestions/{sid}/create-draft", json={"confirmation_token": tok, "idempotency_key": "other"})
+    assert r3.json()["erp_draft_id"] == r1.json()["erp_draft_id"] and len(erp.calls) == 1
+
+
+def test_qty_bounds_and_version_conflict(env):
+    c, _, sid = env
+    _, l = first_line(c, sid)
+    assert c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": l["QTY_MAX"] + 1, "version": 1}).status_code == 400
+    assert c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": 0, "version": 1}).status_code == 400
+    assert c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": 1, "version": 9}).status_code == 409
+    r = c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": 2.5, "version": 1})
+    assert r.status_code == 422
+
+
+def test_draft_requires_current_confirmation(env):
+    c, erp, sid = env
+    _, l = first_line(c, sid)
+    assert c.post(f"/api/suggestions/{sid}/create-draft", json={"idempotency_key": "k"}).status_code == 409
+    tok = c.post(f"/api/suggestions/{sid}/confirm", json={"version": 1}).json()["confirmation_token"]
+    c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": 1, "version": 1})  # ακυρώνει το token
+    r = c.post(f"/api/suggestions/{sid}/create-draft", json={"confirmation_token": tok, "idempotency_key": "k2"})
+    assert r.status_code == 409 and erp.calls == []
+
+
+def test_erp_failure_is_retryable(env, tmp_path):
+    c, erp, sid = env
+    erp.fail = True
+    tok = c.post(f"/api/suggestions/{sid}/confirm", json={"version": 1}).json()["confirmation_token"]
+    r = c.post(f"/api/suggestions/{sid}/create-draft", json={"confirmation_token": tok, "idempotency_key": "a"})
+    assert r.status_code == 502 and c.get(f"/api/suggestions/{sid}").json()["status"] == "failed"
+    erp.fail = False
+    r = c.post(f"/api/suggestions/{sid}/create-draft", json={"confirmation_token": tok, "idempotency_key": "b"})
+    assert r.status_code == 200 and r.json()["status"] == "draft_created"
+
+
+def test_read_endpoints(env):
+    c, _, sid = env
+    assert c.get("/api/health").json()["ok"]
+    risk = c.get("/api/risk?limit=5").json()
+    assert len(risk) == 5 and all(r["days_left"] <= 14 for r in risk)
+    s = c.get(f"/api/suggestions/{sid}").json()
+    assert len(c.get(f"/api/forecasts?trdr={s['TRDR']}").json()) > 0
+    h = c.get(f"/api/customers/{s['TRDR']}/history?mtrl={s['LINES'][0]['MTRL']}").json()
+    assert h["items"][0]["points"]
+    e = c.get(f"/api/suggestions/{sid}/explanation").json()
+    assert e["source"] == "template" and s["CUSTOMER_NAME"] in e["text"]
+    assert c.get("/api/evaluation").json()["default_model"] == "hybrid_0.6"
+    c.post("/api/calls/events", json={"call_sid": "CA9", "status": "discussing", "role": "agent", "text": "Γεια"})
+    assert c.get("/api/calls").json()[0]["transcript"][0]["text"] == "Γεια"
+    assert c.get("/api/suggestions/NOPE").status_code == 404
+
+
+def test_reset_restores_seed(env):
+    c, _, sid = env
+    c.post(f"/api/suggestions/{sid}/cancel")
+    assert c.get(f"/api/suggestions/{sid}").json()["status"] == "cancelled"
+    c.post("/api/admin/reset")
+    assert c.get(f"/api/suggestions/{sid}").json()["status"] == "proposed"
+
+
+def test_explanation_falls_back_when_llm_unavailable(env, monkeypatch):
+    c, _, sid = env
+
+    class Boom:
+        class beta:
+            class messages:
+                @staticmethod
+                def create(**kw):
+                    raise TypeError("Could not resolve authentication method")
+
+    monkeypatch.setattr(explain_mod, "_get_client", lambda: Boom)
+    assert c.get(f"/api/suggestions/{sid}/explanation").json()["source"] == "template"

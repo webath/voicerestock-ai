@@ -9,6 +9,7 @@ uv run pytest                         # 11 tests: cleaning, scoring, submission 
 uv run python -m forecast.ingest      # report + data/processed/*.parquet
 uv run python -m forecast.backtest    # σύγκριση μοντέλων (docs/RESULTS.md)
 uv run python -m forecast.submit      # submissions/team_voicerestock.csv (default μοντέλο: hybrid_0.6)
+uv run python -m forecast.suggest     # data/processed/{suggestions,forecasts,evaluation}.json για το App API
 ```
 
 Τρέχον μοντέλο: **`hybrid_0.6`**, MAE backtest **3,78** (baseline 11,3). Λεπτομέρειες: `docs/RESULTS.md`.

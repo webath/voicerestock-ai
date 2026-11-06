@@ -73,8 +73,9 @@ Twilio ⇄ Voice :8100 ──HTTP──▶ App API :8000 ──HTTP──▶ Moc
 
 ```jsonc
 {
-  "model_version": "v2-cycle-seasonal",
-  "burn_rate_per_day": 0.57,        // μονάδες MTRUNIT1 ανά μέρα
+  "model_version": "hybrid_0.6@2026-11-06",
+  "burn_rate_per_day": 0.57,        // μελλοντικός ρυθμός (μονάδες MTRUNIT1/μέρα)
+  "burn_rate_recent_per_day": 0.74, // ρυθμός τελευταίων 90 ημερών
   "last_purchase_date": "2026-10-24",
   "last_purchase_qty": 4,
   "avg_interval_days": 7.1,         // μέσο διάστημα μεταξύ αγορών
@@ -85,7 +86,8 @@ Twilio ⇄ Voice :8100 ──HTTP──▶ App API :8000 ──HTTP──▶ Moc
   "cold_start": false,
   "peer_group": null,               // π.χ. "Καφέ-Μπαρ / Αθήνα" όταν cold_start
   "factors": [
-    {"name": "seasonality", "impact_days": -1.2, "source": "μηνιαίος δείκτης Νοε 2024–2025"}
+    {"name": "seasonality", "impact_days": 1.2, "source": "ίδια περίοδος πέρσι × φετινή τάση"},
+    {"name": "purchase_cycle", "impact_days": null, "source": "αγοράζει κάθε ~14 μέρες"}
   ],
   "warnings": []                    // π.χ. "λίγο ιστορικό", "ασταθής ρυθμός"
 }
@@ -133,19 +135,21 @@ proposed|modified ──▶ cancelled
 |---|---|---|---|
 | GET | `/api/health` | – | `{"ok": true}` |
 | GET | `/api/salesmen` | – | `[{"PRSN":101,"NAME":"...","phone":"+30..."}]` (phone από `.env`, για demo) |
-| GET | `/api/risk?salesman=105&limit=20` | – | `[{TRDR, CUSTOMER_NAME, MTRL, ITEM_NAME, PREDICTED_DEPLETION_DATE, days_left, CONFIDENCE, urgency}]` ταξινομημένα |
+| GET | `/api/risk?salesman=105&limit=20` | – | `[{TRDR, CUSTOMER_NAME, CUSTOMER_CATEGORY, AREA, SALESMAN, MTRL, ITEM_NAME, CATEGORY, PREDICTED_DEPLETION_DATE, days_left, CONFIDENCE, urgency, suggestion_id}]` — μόνο εξάντληση ≤ 14 μέρες, κατά ημερομηνία |
 | GET | `/api/suggestions?salesman=105&status=proposed` | – | `Suggestion[]` ταξινομημένα κατά urgency |
 | GET | `/api/suggestions/{id}` | – | `Suggestion` |
 | POST | `/api/suggestions/{id}/lines/{mtrl}/quantity` | `{"qty": 15, "version": 1}` | `Suggestion` (version+1). 409 αν λάθος version, 400 εκτός `QTY_MIN..QTY_MAX` |
 | POST | `/api/suggestions/{id}/confirm` | `{"version": 2}` | `{"confirmation_token": "...", "snapshot": Suggestion}` |
 | POST | `/api/suggestions/{id}/create-draft` | `{"confirmation_token": "...", "idempotency_key": "..."}` | `{"erp_draft_id": "DRAFT-...", "status": "draft_created"}` |
 | POST | `/api/suggestions/{id}/cancel` | `{}` | `Suggestion` |
-| GET | `/api/forecasts?trdr=1004` | – | `[{TRDR, MTRL, ITEM_NAME, PREDICTED_DEPLETION_DATE, CONFIDENCE, urgency}]` — όλα τα target ζεύγη του πελάτη (και όχι-at-risk) |
+| GET | `/api/forecasts?trdr=1004` | – | `[{TRDR, MTRL, ITEM_NAME, CATEGORY, PREDICTED_DEPLETION_DATE, days_left, CONFIDENCE, urgency}]` (`urgency: "none"` = καμία εξάντληση σε 90 μέρες) — όλα τα target ζεύγη του πελάτη (και όχι-at-risk) |
 | GET | `/api/customers/{trdr}/history?mtrl=5016` | – | `{"TRDR", "items": [{"MTRL", "ITEM_NAME", "points": [{"date": "2026-10-24", "qty": 4}]}]}` — καθαρή ποσότητα ανά μέρα (πιστωτικά αρνητικά, χωρίς ακυρωμένα/μεταφορικά). `mtrl` προαιρετικό |
-| GET | `/api/suggestions/{id}/explanation` | – | `{"text": "...", "grounded_on": ["burn_rate_per_day", ...]}` — ελληνική εξήγηση από LLM **μόνο** από το evidence |
+| GET | `/api/suggestions/{id}/explanation` | – | `{"text": "...", "source": "llm"\|"template", "model": "...", "grounded_on": [...]}` — ελληνική εξήγηση **μόνο** από το evidence |
 | GET | `/api/evaluation` | – | `{"source": "local_backtest", "cutoffs": [...], "rows": [{"model", "mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"}]}` |
 | POST | `/api/calls/events` | `{"call_sid","type","status?","text?","role?","suggestion_id?","erp_draft_id?"}` | `{"ok": true}` — το Voice στέλνει εδώ ό,τι συμβαίνει |
-| GET | `/api/calls` | – | `Call[]` |
+| GET | `/api/calls` | – | `Call[]` (πιο πρόσφατη πρώτη) |
+| GET | `/api/audit?limit=200` | – | `[{at, actor, action, suggestion_id, outcome}]` |
+| POST | `/api/admin/reset` | – | `{"ok": true, "suggestions": 124}` — ξαναφορτώνει τις προτάσεις (demo) |
 
 Το `create-draft` στο App API μετατρέπει τη Suggestion σε payload ERP:
 `{TRDR, CUSTOMER_CODE, SALESMAN, SUGGESTED_DELIVERY_DATE, REASON, LINES:[{MTRL, ITEM_CODE, QTY1, PREDICTED_DEPLETION_DATE, CONFIDENCE}]}`

@@ -17,7 +17,8 @@ ERP = os.environ.get('ERP_BASE_URL', 'http://localhost:8080').rstrip('/')
 URG = {'high': 0, 'medium': 1, 'low': 2}
 
 LOCK = Lock()
-SUGS = {s['id']: s for s in json.load(open(FIXTURE, encoding='utf-8'))['suggestions']}
+def _seed(): return {s['id']: s for s in json.load(open(FIXTURE, encoding='utf-8'))['suggestions']}
+SUGS = _seed()
 TOKENS = {}      # token -> (suggestion_id, version)
 IDEMP = {}       # idempotency_key -> response
 CALLS = {}       # call_sid -> Call
@@ -151,8 +152,8 @@ class H(BaseHTTPRequestHandler):
             s = SUGS.get(m.group(1))
             return self.send(200, mock_explanation(s)) if s else self.err(404, 'not_found', 'suggestion not found')
         if p == '/api/evaluation': return self.send(200, MOCK_EVALUATION)
-        if p == '/api/calls': return self.send(200, list(CALLS.values()))
-        if p == '/api/audit': return self.send(200, AUDIT)
+        if p == '/api/calls': return self.send(200, list(CALLS.values())[::-1])
+        if p == '/api/audit': return self.send(200, AUDIT[::-1])
         m = re.fullmatch(r'/api/suggestions/([\w-]+)', p)
         if m:
             s = SUGS.get(m.group(1))
@@ -163,6 +164,11 @@ class H(BaseHTTPRequestHandler):
         p = urlparse(self.path).path.rstrip('/'); actor = self.headers.get('X-Actor', 'unknown')
         try: b = self.body()
         except Exception: return self.err(400, 'bad_json', 'invalid JSON body')
+
+        if p == '/api/admin/reset':
+            with LOCK:
+                SUGS.clear(); SUGS.update(_seed()); TOKENS.clear(); IDEMP.clear(); CALLS.clear()
+            return self.send(200, {'ok': True, 'suggestions': len(SUGS)})
 
         if p == '/api/calls/events':
             sid = b.get('call_sid')
