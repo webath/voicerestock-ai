@@ -1,6 +1,6 @@
 """Γράφει το submission στο ακριβές format του submission_template.csv.
 
-    uv run python -m forecast.submit [--model hybrid_0.6] [--team <όνομα>]
+    uv run python -m forecast.submit [--model hybrid_0.7] [--team <όνομα>]
 """
 from __future__ import annotations
 

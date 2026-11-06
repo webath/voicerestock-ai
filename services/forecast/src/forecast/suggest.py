@@ -92,14 +92,20 @@ def evidence(d: Data, row, cold: bool, peer: str | None) -> dict:
         factors.append({"name": "seasonality", "impact_days": _r(impact, 1),
                         "source": "ίδια περίοδος πέρσι × φετινή τάση" if row.has_ly else "εποχικός δείκτης κατηγορίας × περιοχής"})
     if not math.isnan(row.interval):
-        factors.append({"name": "purchase_cycle", "impact_days": None,
-                        "source": f"αγοράζει κάθε ~{int(round(row.interval))} μέρες (διάμεσος 180 ημερών)"})
+        src = (f"αγοράζει κάθε ~{int(round(row.interval))} μέρες (διάμεσος 180 ημερών)" if not row.cold_pair
+               else f"νέος πελάτης: κύκλος ~{int(round(row.interval))} μερών από παρόμοιους πελάτες")
+        factors.append({"name": "purchase_cycle", "impact_days": None, "source": src})
+    if row.last_in_promo and row.interval_used > row.interval:
+        factors.append({"name": "promo_stockpile", "impact_days": _r(row.interval_used - row.interval, 1),
+                        "source": "η τελευταία αγορά έγινε σε προσφορά με μεγαλύτερη ποσότητα από το συνηθισμένο — το απόθεμα κρατά περισσότερο"})
     warnings = []
     if cold:
         warnings.append("νέος πελάτης με λίγο ιστορικό")
     if not row.has_ly:
         warnings.append("χωρίς περσινό ιστορικό — εποχικότητα από παρόμοιους πελάτες")
-    if row.interval_cv > 0.6:
+    if row.cold_pair:
+        warnings.append("μόνο μία αγορά — ο κύκλος εκτιμάται από παρόμοιους πελάτες")
+    if pd.notna(row.interval_cv) and row.interval_cv > 0.6:
         warnings.append("ασταθής κύκλος αγορών")
     end = row.DATE if pd.notna(row.DATE) else CUTOFF + pd.Timedelta(days=90)
     promo = promos_for(d, row.MTRL, TODAY, end)
@@ -149,7 +155,7 @@ def build(d: Data | None = None) -> dict:
     forecasts, by_customer = [], {}
     for r in comp.itertuples(index=False):
         c = cust.loc[r.TRDR]; it = items.loc[r.MTRL]
-        cold = c.INSDATE >= pd.Timestamp("2026-01-01")
+        cold = bool(c.INSDATE >= pd.Timestamp("2026-01-01"))
         conf = max(0.3, float(conf_table.get((r.cv_bin, r.has_ly), 0.4)) * (0.8 if cold else 1.0))
         days_left = int((r.DATE - CUTOFF).days) if pd.notna(r.DATE) else None
         fc = {"TRDR": int(r.TRDR), "MTRL": int(r.MTRL), "ITEM_NAME": it.NAME, "CATEGORY": it.MTRCATEGORY,
