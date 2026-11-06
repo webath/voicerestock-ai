@@ -40,3 +40,6 @@ def test_submission_matches_template():
     assert len(out) == 1975 and list(out.columns) == ["TRDR", "MTRL", "PREDICTED_DEPLETION_DATE", "SUGGESTED_QTY"]
     dates = pd.to_datetime(out["PREDICTED_DEPLETION_DATE"])
     assert (dates.dropna() > C).all() and (dates.dropna() < H).all()
+    q = out["SUGGESTED_QTY"]
+    assert q.notna().equals(dates.notna())          # ποσότητα μόνο όπου υπάρχει εξάντληση
+    assert (q.dropna() >= 1).all() and (q.dropna() % 1 == 0).all()

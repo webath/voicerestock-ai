@@ -11,7 +11,7 @@ import pandas as pd
 
 from .ingest import CUTOFF, DATA, ROOT, load
 from .backtest import history
-from .models import DEFAULT_MODEL, REGISTRY
+from .models import DEFAULT_MODEL, REGISTRY, components
 
 
 def build(model: str = DEFAULT_MODEL) -> pd.DataFrame:
@@ -23,7 +23,14 @@ def build(model: str = DEFAULT_MODEL) -> pd.DataFrame:
     horizon_end = CUTOFF + pd.Timedelta(days=90)
     out.loc[out["DATE"] >= horizon_end, "DATE"] = pd.NaT
     out["PREDICTED_DEPLETION_DATE"] = out["DATE"].dt.strftime("%Y-%m-%d")
-    out["SUGGESTED_QTY"] = np.nan
+    # SUGGESTED_QTY: ίδιος κανόνας με τα suggested orders (κάλυψη ενός κύκλου αγορών), μόνο όπου υπάρχει εξάντληση
+    from .suggest import quantity
+    comp = components(d, history(d, CUTOFF), tg, CUTOFF).set_index(["TRDR", "MTRL"])
+    qty = {k: quantity(r)[0] for k, r in zip(comp.index, comp.itertuples(index=False))
+           if pd.notna(r.r_future) and r.r_future > 0}
+    keys = list(zip(out["TRDR"], out["MTRL"]))
+    out["SUGGESTED_QTY"] = pd.array([qty.get(k) for k in keys], dtype="Int64")
+    out.loc[out["DATE"].isna(), "SUGGESTED_QTY"] = pd.NA
     out = out[list(template.columns)]
     assert len(out) == len(template) == 1975
     assert (out[["TRDR", "MTRL"]].values == template[["TRDR", "MTRL"]].values).all()
