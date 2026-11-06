@@ -86,7 +86,8 @@
 - [ ] Μοντέλο v2: ανακατασκευή αποθέματος από τον κύκλο αγορών (βλ. «Ιδέες αλγορίθμου» παρακάτω)
 - [x] Εποχικότητα (`seasonal_yoy` + `hybrid_0.6`, MAE backtest 3,78)
 - [x] Προσφορές (απόθεμα, όχι κατανάλωση) και cold start από peers — `hybrid_0.7`, MAE backtest 3,63
-- [ ] Αργίες Χριστουγέννων — κάθε βελτίωση στο backtest, γραμμή στο `docs/RESULTS.md`
+- [x] Αργίες Χριστουγέννων: ελέγχθηκαν, δεν χρειάζεται διόρθωση (1/1.975 ζεύγη στο διάστημα)
+- [x] `SUGGESTED_QTY` στο submission — κάθε βελτίωση στο backtest, γραμμή στο `docs/RESULTS.md`
 - [x] `suggest.py`: Suggested Order ανά πελάτη (εργάσιμη παράδοση πριν την εξάντληση, ποσότητα, όρια, confidence, evidence) → `data/processed/suggestions.json` στο σχήμα του fixture
 - [x] `apps/api` (FastAPI): όλα τα endpoints του `docs/CONTRACTS.md` με την ίδια συμπεριφορά με το mock (versions, tokens, idempotency), SQLite για state/audit
 
