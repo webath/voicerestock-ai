@@ -67,15 +67,20 @@ def _depletion(x: pd.DataFrame, c: pd.Timestamp, rate_now: str, rate_future: str
     return out.where(rf.notna())
 
 
-def seasonal_yoy(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
-    """Μελλοντικός ρυθμός = πέρσι την ίδια περίοδο × (φετινή/περσινή τάση)· fallback: εποχικός δείκτης ομάδας."""
+def _yoy_frame(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
     x = _rates(h, tg, c).merge(_last_buy(h), how="left")
     x["g_ratio"] = _group_season_ratio(d, h, tg, c).values
-    has_ly = x["r_ly_recent"] > 0
-    growth = (x["r_recent"] / x["r_ly_recent"].where(has_ly)).clip(0.3, 3)
-    x["r_future"] = np.where(has_ly, x["r_ly_future"] * growth, x["r_recent"] * x["g_ratio"])
+    x["has_ly"] = x["r_ly_recent"] > 0
+    growth = (x["r_recent"] / x["r_ly_recent"].where(x["has_ly"])).clip(0.3, 3)
+    x["r_future"] = np.where(x["has_ly"], x["r_ly_future"] * growth, x["r_recent"] * x["g_ratio"])
+    x["stock_c"] = (x["last_qty"] - x["r_recent"] * (c - x["last_date"]).dt.days).clip(lower=0)
     x["DATE"] = _depletion(x, c, "r_recent", "r_future")
-    return x[["TRDR", "MTRL", "DATE"]]
+    return x
+
+
+def seasonal_yoy(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
+    """Μελλοντικός ρυθμός = πέρσι την ίδια περίοδο × (φετινή/περσινή τάση)· fallback: εποχικός δείκτης ομάδας."""
+    return _yoy_frame(d, h, tg, c)[["TRDR", "MTRL", "DATE"]]
 
 
 def seasonal_group(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
@@ -86,29 +91,44 @@ def seasonal_group(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) 
     return x[["TRDR", "MTRL", "DATE"]]
 
 
-def cadence(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
-    """Επόμενη αγορά ≈ τελευταία αγορά + διάμεσο πρόσφατο διάστημα μεταξύ αγορών."""
+def _cadence_frame(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
     buys = h[h["gross"] > 0].sort_values("DATE")
     buys = buys[buys["DATE"] > c - pd.Timedelta(days=180)]
     gap = buys.groupby(["TRDR", "MTRL"])["DATE"].diff().dt.days
-    med = gap.groupby([buys["TRDR"], buys["MTRL"]]).median().rename("interval").reset_index()
-    x = tg.merge(med, how="left").merge(_last_buy(h), how="left")
+    grp = gap.groupby([buys["TRDR"], buys["MTRL"]])
+    stats = pd.DataFrame({"interval": grp.median(), "interval_cv": grp.std() / grp.mean(),
+                          "n_recent": buys.groupby(["TRDR", "MTRL"]).size(),
+                          "qty_recent_median": buys.groupby(["TRDR", "MTRL"])["gross"].median(),
+                          "qty_recent_max": buys.groupby(["TRDR", "MTRL"])["gross"].max()}).reset_index()
+    x = tg.merge(stats, how="left").merge(_last_buy(h), how="left")
     x["DATE"] = x["last_date"] + pd.to_timedelta(np.ceil(x["interval"]), unit="D")
     x.loc[x["DATE"] <= c, "DATE"] = c + pd.Timedelta(days=1)
-    return x[["TRDR", "MTRL", "DATE"]]
+    return x
+
+
+def cadence(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
+    """Επόμενη αγορά ≈ τελευταία αγορά + διάμεσο πρόσφατο διάστημα μεταξύ αγορών."""
+    return _cadence_frame(d, h, tg, c)[["TRDR", "MTRL", "DATE"]]
+
+
+def components(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp, w_cadence: float = 0.6) -> pd.DataFrame:
+    """Όλα τα ενδιάμεσα του hybrid (για evidence / suggestions). Η στήλη DATE είναι η πρόβλεψη."""
+    y = _yoy_frame(d, h, tg, c).rename(columns={"DATE": "date_yoy"})
+    k = _cadence_frame(d, h, tg, c)[["TRDR", "MTRL", "DATE", "interval", "interval_cv", "n_recent",
+                                      "qty_recent_median", "qty_recent_max"]].rename(columns={"DATE": "date_cadence"})
+    x = y.merge(k, on=["TRDR", "MTRL"], how="left")
+    yd = (x["date_yoy"] - c).dt.days
+    kd = (x["date_cadence"] - c).dt.days.fillna(yd)
+    days = (w_cadence * kd + (1 - w_cadence) * yd).round().clip(lower=1)
+    x["DATE"] = (c + pd.to_timedelta(days, unit="D")).where(x["date_yoy"].notna())
+    return x
 
 
 def hybrid(w_cadence: float = 0.5):
     """«Καμία εξάντληση» από το seasonal_yoy (πιάνει τα ζεύγη που σταματούν τον χειμώνα)·
     ημερομηνία = σταθμισμένος μέσος cadence και seasonal_yoy."""
     def f(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
-        y = seasonal_yoy(d, h, tg, c).rename(columns={"DATE": "y"})
-        k = cadence(d, h, tg, c).rename(columns={"DATE": "k"})
-        x = y.merge(k, on=["TRDR", "MTRL"])
-        k_days = (x["k"] - c).dt.days.fillna((x["y"] - c).dt.days)
-        days = (w_cadence * k_days + (1 - w_cadence) * (x["y"] - c).dt.days).round().clip(lower=1)
-        x["DATE"] = (c + pd.to_timedelta(days, unit="D")).where(x["y"].notna())
-        return x[["TRDR", "MTRL", "DATE"]]
+        return components(d, h, tg, c, w_cadence)[["TRDR", "MTRL", "DATE"]]
     f.__name__ = f"hybrid_{w_cadence}"
     return f
 
