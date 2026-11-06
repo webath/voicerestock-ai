@@ -62,6 +62,8 @@ disconnected / timeout → ασφαλής έξοδος, κανένα νέο orde
 
 Στείλε κάθε μετάβαση + κάθε φράση (agent/χρήστη) στο `POST /api/calls/events` ώστε να φαίνεται live στο dashboard.
 
+**Η σελίδα `/voice` του dashboard είναι έτοιμη** (Δημήτρης): ανανεώνεται κάθε 3", δείχνει βήματα (`dialing → connected → discussing → confirming → posting_draft → draft_created`), transcript (`role: "agent"` / `"user"`) και draft ids. Το κουμπί «Κάλεσε» κάνει `POST {VOICE_URL}/voice/calls {"salesman": 105}` — αυτό το endpoint είναι δικό σου.
+
 ## Κανόνες ασφαλείας (θα τους ψάξουν οι κριτές)
 
 1. **AI disclosure** στην αρχή: «Γεια σας, είμαι ο ψηφιακός βοηθός της DEMO ΔΙΑΝΟΜΕΣ…»

@@ -125,6 +125,53 @@ export async function apiGet<T>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+export const VOICE_URL = process.env.NEXT_PUBLIC_VOICE_URL ?? "http://localhost:8100";
+
+export interface CallTurn { role: string; text: string; at: string }
+export interface Call {
+  call_sid: string;
+  salesman: number | null;
+  suggestion_ids: string[];
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  transcript: CallTurn[];
+  erp_draft_ids: string[];
+}
+
+export interface Salesman { PRSN: number; NAME: string; phone: string | null }
+
+export interface RiskRow extends Forecast {
+  CUSTOMER_NAME: string;
+  CUSTOMER_CATEGORY: string;
+  AREA: string;
+  SALESMAN: number;
+  suggestion_id: string | null;
+}
+
+export class ApiError extends Error {
+  constructor(public status: number, public code: string, message: string) { super(message); }
+}
+
+export async function apiPost<T>(path: string, body: unknown = {}, base = API_URL): Promise<T> {
+  const r = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Actor": "dashboard" },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(r.status, data.error ?? "error", data.message ?? data.detail?.[0]?.msg ?? `${r.status}`);
+  return data as T;
+}
+
+/** Επαναφόρτωση ανά `ms` (π.χ. live κλήσεις). */
+export function usePolling(reload: () => void, ms: number) {
+  useEffect(() => {
+    const id = setInterval(reload, ms);
+    return () => clearInterval(id);
+  }, [reload, ms]);
+}
+
 /** Φέρνει δεδομένα από το API. Στο refetch κρατά τα προηγούμενα δεδομένα (χωρίς flash). */
 export function useApi<T>(path: string | null) {
   const [state, setState] = useState<{ key: string | null; data: T | null; error: string | null }>({

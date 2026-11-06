@@ -51,7 +51,7 @@ export function CustomerView({ trdr }: { trdr: number }) {
         </div>
       </PageHeader>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="reveal grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2" title={fc ? fc.ITEM_NAME : "Παραλαβές"}
           subtitle={fc?.PREDICTED_DEPLETION_DATE
             ? <>Εκτιμώμενη εξάντληση <strong className="text-ink">{fmtDayLong(fc.PREDICTED_DEPLETION_DATE)}</strong> · confidence {fmtPct(fc.CONFIDENCE)}</>

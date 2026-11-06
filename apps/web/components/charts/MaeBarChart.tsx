@@ -60,7 +60,7 @@ export function MaeBarChart({ rows, current }: { rows: EvalRow[]; current: strin
                 fill={isCur ? "var(--ink)" : "var(--ink-2)"} fontWeight={isCur ? 600 : 400}>
                 {MODEL_LABELS[d.model] ?? d.model}
               </text>
-              <path d={barPath(labelW, y, w, barH, "right")}
+              <path className="grow-xb" style={{ animationDelay: `${i * 50}ms` }} d={barPath(labelW, y, w, barH, "right")}
                 fill={isCur ? "var(--series-1)" : "var(--deemph)"}
                 opacity={hover && hover.row.model !== d.model ? 0.6 : 1} />
               <text x={labelW + w + 6} y={y + barH / 2 + 4} fontSize={12} fill="var(--ink)" className="tnum"

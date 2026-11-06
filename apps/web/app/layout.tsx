@@ -1,37 +1,28 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Commissioner } from "next/font/google";
+import { Suspense } from "react";
+import { Nav, NavFrame } from "@/components/Nav";
 import "./globals.css";
+
+const ui = Commissioner({ subsets: ["latin", "greek"], variable: "--font-ui", display: "swap" });
 
 export const metadata: Metadata = {
   title: "VoiceRestock AI",
   description: "Προβλέψεις εξάντλησης αποθέματος και προτεινόμενες παραγγελίες για τον Account Manager",
 };
 
-// Πλοήγηση: οι σελίδες χωρίς owner ακόμα (Overview, At Risk, Orders, Voice) είναι του Νίκου.
-const NAV = [
-  { href: "/", label: "Overview" },
-  { href: "/risk", label: "At Risk" },
-  { href: "/orders", label: "Παραγγελίες" },
-  { href: "/customers", label: "Πελάτες" },
-  { href: "/evaluation", label: "Αξιολόγηση" },
-  { href: "/voice", label: "Κλήσεις" },
-];
-
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="el" className="h-full antialiased">
+    <html lang="el" className={`${ui.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
-        <header className="border-b border-line bg-surface">
-          <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-            <Link href="/" className="font-semibold text-ink">VoiceRestock AI</Link>
-            <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-ink-2">
-              {NAV.map((n) => (
-                <Link key={n.href} href={n.href} className="hover:text-ink">{n.label}</Link>
-              ))}
-            </div>
-          </nav>
-        </header>
+        <div className="backdrop" aria-hidden />
+        <Suspense fallback={<NavFrame path={null} />}>
+          <Nav />
+        </Suspense>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">{children}</main>
+        <footer className="mx-auto w-full max-w-6xl px-4 pb-8 text-xs text-ink-muted sm:px-6">
+          DEMO ΔΙΑΝΟΜΕΣ Α.Ε. · συνθετικά δεδομένα · σενάριο «σήμερα 1/11/2026» · Revival Challenge #5
+        </footer>
       </body>
     </html>
   );

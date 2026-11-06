@@ -23,7 +23,7 @@ export default function EvaluationPage() {
         subtitle={<>Τοπικό backtest σε {data.cutoffs.length} ψεύτικα cutoffs της ίδιας εποχής ({data.cutoffs.map(fmtDay).join(", ")}). Το επίσημο σκορ το υπολογίζει η Revival.</>}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="reveal grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile hero label="Μέσο λάθος (MAE)" value={<>{fmt1(cur.mae)} <span className="text-lg font-normal text-ink-2">μέρες</span></>}
           note={`${MODEL_LABELS[cur.model] ?? cur.model}`} />
         <StatTile label="Baseline 180 ημερών" value={<>{fmt1(base?.mae)} <span className="text-base font-normal text-ink-2">μέρες</span></>}
@@ -33,7 +33,7 @@ export default function EvaluationPage() {
           note={`${fmtNum(data.coverage.with_date)} με ημερομηνία · ${fmtNum(data.coverage.blank)} χωρίς εξάντληση σε 90 μέρες`} />
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-5">
+      <div className="reveal mt-6 grid gap-6 lg:grid-cols-5">
         <Card className="lg:col-span-3" title="Μέσο λάθος ανά μοντέλο" subtitle="Μέρες, μικρότερο = καλύτερο. Μέσος όρος των cutoffs.">
           <MaeBarChart rows={data.rows} current={data.default_model} />
         </Card>

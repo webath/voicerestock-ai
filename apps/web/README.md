@@ -1,4 +1,4 @@
-# apps/web — Dashboard (Next.js 16) — Νίκος (+ 2 σελίδες Δημήτρη)
+# apps/web — Dashboard (Next.js 16) — Δημήτρης
 
 > Next.js **16**: διάβασε το `AGENTS.md` — APIs και conventions διαφέρουν από παλιότερες εκδόσεις.
 > Τα docs είναι στο `node_modules/next/dist/docs/`.
@@ -14,17 +14,22 @@ npm run lint && npm run build
 
 ## Σελίδες
 
-| Σελίδα | Path | Owner | Endpoints |
-|---|---|---|---|
-| Overview | `/` | **Νίκος** (τώρα: προσωρινό) | `/api/risk`, `/api/suggestions`, `/api/calls`, `/api/evaluation` |
-| At Risk | `/risk` | **Νίκος** | `/api/risk`, `/api/salesmen` |
-| Suggested Orders (edit qty, approve → draft id) | `/orders` | **Νίκος** | `/api/suggestions`, `.../quantity`, `.../confirm`, `.../create-draft` |
-| Voice Operations | `/voice` | **Νίκος** | `/api/calls`, `POST {VOICE_URL}/voice/calls` |
-| Πελάτες (λίστα) | `/customers` | Δημήτρης ✅ | `/api/customers`, `/api/suggestions` |
-| Πελάτης (ιστορικό, πρόβλεψη ανά είδος, πρόταση, εξήγηση) | `/customers/[trdr]` | Δημήτρης ✅ | `/api/customers/{trdr}`, `/history`, `/api/forecasts?trdr=`, `/explanation` |
-| Αξιολόγηση (MAE, ±3/±7, ανά cutoff) | `/evaluation` | Δημήτρης ✅ | `/api/evaluation` |
+| Σελίδα | Path | Endpoints |
+|---|---|---|
+| Επισκόπηση (KPIs, εξαντλήσεις/μέρα, επόμενες παραδόσεις, ανά πωλητή, κλήσεις, «Επαναφορά demo») | `/` | `/api/suggestions`, `/api/risk`, `/api/calls`, `/api/evaluation`, `/api/admin/reset` |
+| At Risk (φίλτρα στο URL: `?salesman=&type=&area=&h=3\|7\|14&q=`) | `/risk` | `/api/risk`, `/api/salesmen`, `/api/suggestions` |
+| Παραγγελίες (± ποσότητα, «Έγκριση & αποστολή στο ERP» → draft id, `?open=SUG-…`) | `/orders` | `/api/suggestions`, `.../quantity`, `.../confirm`, `.../create-draft`, `.../cancel` |
+| Πελάτες / Πελάτης (ιστορικό, πρόβλεψη ανά είδος, πρόταση, εξήγηση) | `/customers`, `/customers/[trdr]` | `/api/customers…`, `/history`, `/api/forecasts?trdr=`, `/explanation` |
+| Κλήσεις (live κάθε 3", βήματα, transcript, «Κάλεσε») | `/voice` | `/api/calls`, `POST {NEXT_PUBLIC_VOICE_URL}/voice/calls` |
+| Αξιολόγηση (MAE, ±3/±7, ανά cutoff) | `/evaluation` | `/api/evaluation` |
 
-Η At Risk / Orders μπορούν να κάνουν link σε `/customers/{TRDR}` για λεπτομέρειες.
+## Θέμα «παγωμένο γυαλί»
+
+- Γυάλινες κάρτες (`.card`: `backdrop-filter: blur(18px)`) πάνω σε φόντο με απαλές λάμψεις πάγου/aqua + κόκκο (`.backdrop`).
+- Γραμματοσειρά **Commissioner** (latin + greek) μέσω `next/font`.
+- Κίνηση: `.reveal` (διαδοχική εμφάνιση παιδιών), `.lift` (hover), `.grow-x/.grow-y/.grow-xb` (μπάρες), `.expand` (άνοιγμα καρτών).
+  Όλα σβήνουν με `prefers-reduced-motion`.
+- Light/dark από το σύστημα, ή `<html data-theme="dark|light">`.
 
 ## Κοινά κομμάτια (χρησιμοποίησέ τα)
 

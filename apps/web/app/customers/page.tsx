@@ -28,11 +28,11 @@ export default function CustomersPage() {
       <PageHeader title="Πελάτες" subtitle={`${fmtNum(customers.data.length)} πελάτες · ταξινόμηση κατά πρώτη εκτιμώμενη εξάντληση`}>
         <input
           type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Αναζήτηση πελάτη, πόλης, πωλητή"
-          className="w-72 max-w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted"
+          className="field w-72 max-w-full"
           aria-label="Αναζήτηση πελάτη"
         />
       </PageHeader>
-      <div className="card overflow-x-auto">
+      <div className="card fade-in overflow-x-auto">
         <table className="data">
           <thead>
             <tr>

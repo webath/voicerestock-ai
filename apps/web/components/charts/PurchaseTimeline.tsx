@@ -76,7 +76,7 @@ export function PurchaseTimeline({ points, unit, depletion, delivery, daysBack =
               onPointerMove={() => setHover({ ...p, x: cx, y })}
               onPointerLeave={() => setHover(null)}>
               <rect x={cx - Math.max(6, barW)} y={top} width={Math.max(12, barW * 2)} height={plotH} fill="transparent" />
-              <path d={barPath(cx - barW / 2, y, barW, h, up ? "up" : "down")}
+              <path className="grow-y" d={barPath(cx - barW / 2, y, barW, h, up ? "up" : "down")}
                 fill={up ? "var(--series-1)" : "var(--ink-muted)"}
                 opacity={hover && hover.date !== p.date ? 0.55 : 1} />
             </g>

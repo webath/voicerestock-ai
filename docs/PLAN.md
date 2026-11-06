@@ -38,8 +38,7 @@
 | App API (suggestions, quantity, confirm, create-draft, history, evaluation, calls, audit) | **Δημήτρης** | `apps/api/` |
 | LLM εξηγήσεις για το dashboard (grounded σε evidence) | **Δημήτρης** | `apps/api/` (`/explanation`) |
 | Αποτελέσματα backtest | **Δημήτρης** | `docs/RESULTS.md` |
-| Dashboard: Overview, At Risk, Suggested Orders, Voice Ops | **Νίκος** | `apps/web/` |
-| Dashboard: Πελάτες + Πελάτης, Αξιολόγηση (έτοιμες) | **Δημήτρης** | `apps/web/app/customers/`, `apps/web/app/evaluation/` |
+| Dashboard: όλες οι σελίδες (έτοιμες, glass theme) | **Δημήτρης** | `apps/web/` |
 | Voice agent (Twilio, WS, STT/TTS, LLM dialogue, tools, state machine) | **Νίκος** | `apps/voice/` |
 | Mock App API (κρατιέται ίδιο με τα contracts) | **Νίκος** | `scripts/mock_app_api.py` |
 | Contracts (σχήματα JSON, endpoints) | **κοινό** — αλλαγή μόνο με PR & ok και από τους δύο | `docs/CONTRACTS.md`, `fixtures/` |
@@ -77,7 +76,7 @@
 - [x] **`submissions/team_<όνομα>.csv` v1** με 1.975 γραμμές → commit. Από εδώ και πέρα έχουμε πάντα κάτι να παραδώσουμε
 
 **Νίκος**
-- [ ] Σελίδα **At Risk** πάνω στο mock (`GET /api/risk`, `GET /api/suggestions`) με φίλτρα πωλητή / κατηγορίας / περιοχής / urgency
+- [x] Σελίδα **At Risk** (Δημήτρης) (`GET /api/risk`, `GET /api/suggestions`) με φίλτρα πωλητή / κατηγορίας / περιοχής / urgency
 - [ ] `apps/voice`: Node + TypeScript + Fastify, TwiML endpoint, WebSocket για ConversationRelay, LLM loop με tool calling πάνω στο mock
 - [ ] Ο agent διαβάζει μια πρόταση από το fixture και την περιγράφει στα ελληνικά στο τηλέφωνο
 
@@ -93,7 +92,7 @@
 - [x] `apps/api` (FastAPI): όλα τα endpoints του `docs/CONTRACTS.md` με την ίδια συμπεριφορά με το mock (versions, tokens, idempotency), SQLite για state/audit
 
 **Νίκος**
-- [ ] Σελίδα **Suggested Orders**: αλλαγή ποσότητας, «Έγκριση» (confirm → create-draft) → δείχνει το ERP draft id
+- [x] Σελίδα **Suggested Orders** (Δημήτρης): αλλαγή ποσότητας, «Έγκριση» (confirm → create-draft) → δείχνει το ERP draft id
 - [ ] Voice: όλα τα tools, state machine κλήσης, διπλή προφορική επιβεβαίωση, εξήγηση **μόνο** από το `evidence`
 
 ### 🔗 Checkpoint integration (Σαβ 14:00)
@@ -112,8 +111,8 @@
 
 **Νίκος**
 - [x] Σελίδες **Customer detail** και **Evaluation** — τις έκανε ο Δημήτρης (`/customers`, `/customers/[trdr]`, `/evaluation`)
-- [ ] Σελίδα **Overview**
-- [ ] Σελίδα **Voice Operations** (ουρά κλήσεων, status, transcript, draft id) + κουμπί «Κάλεσε τον πωλητή»
+- [x] Σελίδα **Overview** (Δημήτρης)
+- [x] Σελίδα **Voice Operations** (Δημήτρης — διαβάζει `GET /api/calls`, κουμπί → `POST {VOICE_URL}/voice/calls`) (ουρά κλήσεων, status, transcript, draft id) + κουμπί «Κάλεσε τον πωλητή»
 - [ ] Voice edge cases: voicemail, κλείσιμο γραμμής, «15» vs «50», διπλό webhook → **ποτέ** διπλό draft· allowlist, quiet hours, AI disclosure
 
 ### Φάση 4 — Τελικά (Κυρ 08:00–13:00)
