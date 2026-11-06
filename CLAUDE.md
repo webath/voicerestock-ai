@@ -11,7 +11,7 @@
 1. `docs/PLAN.md` — σειρά υλοποίησης, ποιος έχει τι, checkboxes προόδου
 2. `docs/CONTRACTS.md` — σχήματα JSON & endpoints (το μόνο σημείο επαφής των δύο μερών)
 3. `docs/DATA_NOTES.md` — κανόνες δεδομένων & βαθμολόγησης
-4. `docs/VOICE.md` — μόνο αν δουλεύεις στο voice
+4. `docs/VOICE.md` — μόνο αν δουλεύεις στο voice (Νίκος)
 5. `team_pack/README_challenge.md` — η επίσημη περιγραφή (**υπερισχύει** όλων των παραπάνω)
 6. `docs/challenge/*.pdf` — deck της Revival + master spec (σκεπτικό, όχι υποχρεωτικό)
 
@@ -21,8 +21,8 @@
 
 | Developer | Φάκελοι που γράφει |
 |---|---|
-| Δημήτρης | `services/forecast/`, `apps/api/`, `apps/web/` (εκτός `apps/web/app/voice/`), `submissions/`, `docs/RESULTS.md` |
-| Νίκος | `apps/voice/`, `apps/web/app/voice/`, `scripts/mock_app_api.py` |
+| Δημήτρης (data & backend) | `services/forecast/`, `apps/api/`, `submissions/`, `docs/RESULTS.md` |
+| Νίκος (dashboard & voice) | `apps/web/`, `apps/voice/`, `scripts/mock_app_api.py` |
 | Κοινά (μόνο με συνεννόηση) | `docs/CONTRACTS.md`, `fixtures/`, `docs/PLAN.md` (checkboxes ελεύθερα), `docs/DEMO.md`, `README.md` |
 
 Αν μια αλλαγή χρειάζεται να αγγίξει φάκελο του άλλου ή τα contracts: **σταμάτα και πες το στον χρήστη** αντί να το κάνεις.

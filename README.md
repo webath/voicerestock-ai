@@ -10,8 +10,8 @@
 
 | | Ρόλος |
 |---|---|
-| **Δημήτρης** | Data, forecasting, submission, App API, dashboard |
-| **Νίκος** | Voice agent (Twilio + LLM), σελίδα Voice Operations |
+| **Δημήτρης** | Data & backend: forecasting, submission, suggested orders, App API, LLM εξηγήσεις |
+| **Νίκος** | Dashboard & voice: Next.js dashboard, voice agent (Twilio + LLM) |
 
 ➡️ **Ξεκίνα από το [`docs/PLAN.md`](docs/PLAN.md)** (σειρά υλοποίησης & checkboxes) και το [`docs/CONTRACTS.md`](docs/CONTRACTS.md).
 
@@ -30,7 +30,7 @@ Twilio ⇄ apps/voice (Node/TS) ──HTTP──▶ apps/api (FastAPI) ───
 | `team_pack/` | Επίσημο data pack + mock ERP (**μην το αλλάζετε**) | – | 8080 |
 | `services/forecast/` | Ingestion, cleaning, features, model, backtest, submission, suggestions | Δημήτρης | – |
 | `apps/api/` | App API: suggestions, quantity/confirm/create-draft, calls, audit | Δημήτρης | 8000 |
-| `apps/web/` | Dashboard | Δημήτρης (+ `app/voice/` Νίκος) | 3000 |
+| `apps/web/` | Dashboard | Νίκος | 3000 |
 | `apps/voice/` | Voice agent | Νίκος | 8100 |
 | `scripts/mock_app_api.py` | Mock του App API πάνω σε fixture — για ανάπτυξη χωρίς backend | Νίκος | 8000 |
 | `fixtures/` | Παραδείγματα JSON σύμφωνα με τα contracts | κοινό | – |

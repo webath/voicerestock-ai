@@ -24,6 +24,47 @@ CALLS = {}       # call_sid -> Call
 AUDIT = []
 
 
+def _rd(name):
+    import csv
+    with open(os.path.join(ROOT, 'team_pack', 'data', name), encoding='utf-8-sig', newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def load_history():
+    """Καθαρή ποσότητα ανά (TRDR, MTRL, ημέρα): χωρίς ακυρωμένα & υπηρεσίες, πιστωτικά αρνητικά, free goods μέσα."""
+    items = {r['MTRL']: r for r in _rd('MTRL.csv')}
+    heads = {h['FINDOC']: h for h in _rd('SALDOC.csv') if h['ISCANCEL'] == '0'}
+    hist = {}
+    for l in _rd('MTRLINES.csv'):
+        h = heads.get(l['FINDOC'])
+        if not h or items[l['MTRL']]['MTRTYPE'] != '0': continue
+        q = float(l['QTY1']) * (-1 if h['SERIES'] == '7071' else 1)
+        d = hist.setdefault(int(h['TRDR']), {}).setdefault(int(l['MTRL']), {})
+        d[h['TRNDATE']] = d.get(h['TRNDATE'], 0) + q
+    return items, hist
+
+
+ITEMS, HISTORY = load_history()
+TARGETS = {}
+for r in _rd('prediction_targets.csv'): TARGETS.setdefault(int(r['TRDR']), []).append(int(r['MTRL']))
+
+MOCK_EVALUATION = {'source': 'MOCK — όχι πραγματικά αποτελέσματα', 'cutoffs': ['2026-08-01'],
+                   'rows': [{'model': 'cutoff+30 (README)', 'mae': 18.3, 'within_3': None, 'within_7': None, 'at_risk_precision': None, 'at_risk_recall': None},
+                            {'model': 'baseline 180d (README)', 'mae': 16.1, 'within_3': None, 'within_7': None, 'at_risk_precision': None, 'at_risk_recall': None}]}
+
+
+def mock_explanation(s):
+    parts = []
+    for l in s['LINES']:
+        e = l['evidence']
+        t = (f"{l['ITEM_NAME']}: καταναλώνει περίπου {e['burn_rate_per_day']} {l['UNIT']} τη μέρα, τελευταία παραλαβή "
+             f"{e['last_purchase_qty']} {l['UNIT']} στις {e['last_purchase_date']}, άρα εκτιμάται εξάντληση γύρω στις {l['PREDICTED_DEPLETION_DATE']}.")
+        if e.get('promo'): t += f" Ισχύει {e['promo']['name']} ({e['promo']['from']} έως {e['promo']['to']})."
+        if e.get('cold_start'): t += f" Νέος πελάτης — η πρόβλεψη βασίζεται σε παρόμοιους ({e['peer_group']})."
+        parts.append(t)
+    return {'text': '[MOCK, χωρίς LLM] ' + ' '.join(parts), 'grounded_on': ['burn_rate_per_day', 'last_purchase_qty', 'last_purchase_date', 'promo', 'cold_start']}
+
+
 def now(): return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
@@ -87,6 +128,29 @@ class H(BaseHTTPRequestHandler):
                     for s in SUGS.values() for l in s['LINES'] if 'salesman' not in q or str(s['SALESMAN']) == q['salesman']]
             rows.sort(key=lambda r: r['PREDICTED_DEPLETION_DATE'])
             return self.send(200, rows[:int(q.get('limit', 50))])
+        if p == '/api/forecasts':
+            t = int(q.get('trdr', 0))
+            by_mtrl = {l['MTRL']: (s, l) for s in SUGS.values() if s['TRDR'] == t for l in s['LINES']}
+            rows = []
+            for m in TARGETS.get(t, []):
+                s, l = by_mtrl.get(m, (None, None))
+                rows.append({'TRDR': t, 'MTRL': m, 'ITEM_NAME': ITEMS[str(m)]['NAME'],
+                             'PREDICTED_DEPLETION_DATE': l['PREDICTED_DEPLETION_DATE'] if l else None,
+                             'CONFIDENCE': l['CONFIDENCE'] if l else None, 'urgency': s['urgency'] if s else 'low'})
+            return self.send(200, rows)
+        m = re.fullmatch(r'/api/customers/(\d+)/history', p)
+        if m:
+            t = int(m.group(1)); h = HISTORY.get(t)
+            if h is None: return self.err(404, 'not_found', 'customer not found')
+            mt = q.get('mtrl')
+            return self.send(200, {'TRDR': t, 'items': [
+                {'MTRL': k, 'ITEM_NAME': ITEMS[str(k)]['NAME'], 'points': [{'date': d, 'qty': v} for d, v in sorted(pts.items())]}
+                for k, pts in sorted(h.items()) if not mt or str(k) == mt]})
+        m = re.fullmatch(r'/api/suggestions/([\w-]+)/explanation', p)
+        if m:
+            s = SUGS.get(m.group(1))
+            return self.send(200, mock_explanation(s)) if s else self.err(404, 'not_found', 'suggestion not found')
+        if p == '/api/evaluation': return self.send(200, MOCK_EVALUATION)
         if p == '/api/calls': return self.send(200, list(CALLS.values()))
         if p == '/api/audit': return self.send(200, AUDIT)
         m = re.fullmatch(r'/api/suggestions/([\w-]+)', p)

@@ -11,7 +11,7 @@
 | App API (`apps/api`, FastAPI) | Δημήτρης | 8000 | Forecasts, suggestions, state, audit, ERP writes |
 | Mock App API (`scripts/mock_app_api.py`) | Νίκος (dev only) | 8000 | Ίδια endpoints πάνω στο fixture — για όσο δεν υπάρχει το πραγματικό |
 | Voice (`apps/voice`, Node/TS) | Νίκος | 8100 | Twilio webhooks, WebSocket, LLM dialogue |
-| Web (`apps/web`, Next.js) | Δημήτρης (+ `app/voice/` Νίκος) | 3000 | Dashboard |
+| Web (`apps/web`, Next.js) | Νίκος | 3000 | Dashboard |
 
 ```
 Twilio ⇄ Voice :8100 ──HTTP──▶ App API :8000 ──HTTP──▶ Mock ERP :8080
@@ -140,8 +140,10 @@ proposed|modified ──▶ cancelled
 | POST | `/api/suggestions/{id}/confirm` | `{"version": 2}` | `{"confirmation_token": "...", "snapshot": Suggestion}` |
 | POST | `/api/suggestions/{id}/create-draft` | `{"confirmation_token": "...", "idempotency_key": "..."}` | `{"erp_draft_id": "DRAFT-...", "status": "draft_created"}` |
 | POST | `/api/suggestions/{id}/cancel` | `{}` | `Suggestion` |
-| GET | `/api/forecasts?trdr=1004` | – | όλες οι προβλέψεις του πελάτη (και όχι-at-risk) |
-| GET | `/api/evaluation` | – | `{"baseline": {...}, "model": {...}}` από το backtest |
+| GET | `/api/forecasts?trdr=1004` | – | `[{TRDR, MTRL, ITEM_NAME, PREDICTED_DEPLETION_DATE, CONFIDENCE, urgency}]` — όλα τα target ζεύγη του πελάτη (και όχι-at-risk) |
+| GET | `/api/customers/{trdr}/history?mtrl=5016` | – | `{"TRDR", "items": [{"MTRL", "ITEM_NAME", "points": [{"date": "2026-10-24", "qty": 4}]}]}` — καθαρή ποσότητα ανά μέρα (πιστωτικά αρνητικά, χωρίς ακυρωμένα/μεταφορικά). `mtrl` προαιρετικό |
+| GET | `/api/suggestions/{id}/explanation` | – | `{"text": "...", "grounded_on": ["burn_rate_per_day", ...]}` — ελληνική εξήγηση από LLM **μόνο** από το evidence |
+| GET | `/api/evaluation` | – | `{"source": "local_backtest", "cutoffs": [...], "rows": [{"model", "mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"}]}` |
 | POST | `/api/calls/events` | `{"call_sid","type","status?","text?","role?","suggestion_id?","erp_draft_id?"}` | `{"ok": true}` — το Voice στέλνει εδώ ό,τι συμβαίνει |
 | GET | `/api/calls` | – | `Call[]` |
 

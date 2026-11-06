@@ -1,6 +1,6 @@
 # Πλάνο υλοποίησης & μοιρασιά δουλειάς
 
-**Ομάδα:** Δημήτρης (data, forecast, API, dashboard) · Νίκος (Voice Agent)
+**Ομάδα:** Δημήτρης (data & backend) · Νίκος (dashboard & voice agent)
 **Παρουσίαση:** Κυριακή 8/11, 15:00 · **Code freeze:** Κυριακή 13:00
 **Χρόνος:** Παρασκευή 6/11 ~19:00 → Κυριακή 13:00 ≈ 30–34 ώρες ενεργής δουλειάς
 
@@ -17,8 +17,15 @@
 4. Βελτίωση MAE (στόχος < 10 μέρες, baseline 16,1).
 5. Voice agent (το «wow» του demo — αλλά **ποτέ** δεν πρέπει να μπλοκάρει τα 1–4).
 
-Το voice agent είναι ανεξάρτητο κομμάτι: ο Νίκος δουλεύει από την πρώτη στιγμή πάνω σε **fixtures + mock API**
-(`fixtures/suggestions.sample.json`, `scripts/mock_app_api.py`) και αλλάζει στο πραγματικό API στο checkpoint του Σαββάτου.
+## Η λογική της μοιρασιάς
+
+Χωρίζουμε στο **HTTP API** (`docs/CONTRACTS.md`):
+
+- **Δημήτρης = από τα δεδομένα μέχρι το API.** Ό,τι παράγει αριθμούς (forecast, ποσότητες, confidence, evidence) και ό,τι γράφει στο ERP.
+- **Νίκος = ό,τι βλέπει ή ακούει ο χρήστης.** Dashboard και voice agent. Και τα δύο είναι *καταναλωτές* του ίδιου API.
+
+Ο Νίκος δουλεύει από την πρώτη στιγμή πάνω σε **fixtures + mock API** (`fixtures/suggestions.sample.json`, `scripts/mock_app_api.py`)
+και αλλάζει στο πραγματικό API στο checkpoint του Σαββάτου. Έτσι κανείς δεν περιμένει τον άλλον.
 
 ---
 
@@ -27,16 +34,19 @@
 | Περιοχή | Owner | Φάκελος |
 |---|---|---|
 | Ingestion, cleaning, features, forecast, backtest, submission | **Δημήτρης** | `services/forecast/` |
-| App API (suggestions, quantity, confirm, create-draft, events) | **Δημήτρης** | `apps/api/` |
-| Dashboard (Overview, At Risk, Customer, Suggested Orders, Evaluation) | **Δημήτρης** | `apps/web/` |
+| Suggested orders (ποσότητα, ημ. παράδοσης, confidence, evidence) | **Δημήτρης** | `services/forecast/` |
+| App API (suggestions, quantity, confirm, create-draft, history, evaluation, calls, audit) | **Δημήτρης** | `apps/api/` |
+| LLM εξηγήσεις για το dashboard (grounded σε evidence) | **Δημήτρης** | `apps/api/` (`/explanation`) |
+| Αποτελέσματα backtest | **Δημήτρης** | `docs/RESULTS.md` |
+| Dashboard: Overview, At Risk, Customer, Suggested Orders, Evaluation, Voice Ops | **Νίκος** | `apps/web/` |
 | Voice agent (Twilio, WS, STT/TTS, LLM dialogue, tools, state machine) | **Νίκος** | `apps/voice/` |
-| Σελίδα «Voice Operations» στο dashboard | **Νίκος** | `apps/web/app/voice/` |
-| Mock App API για ανάπτυξη voice χωρίς backend | **Νίκος** (το έχει ήδη έτοιμο) | `scripts/mock_app_api.py` |
+| Mock App API (κρατιέται ίδιο με τα contracts) | **Νίκος** | `scripts/mock_app_api.py` |
 | Contracts (σχήματα JSON, endpoints) | **κοινό** — αλλαγή μόνο με PR & ok και από τους δύο | `docs/CONTRACTS.md`, `fixtures/` |
 | Pitch / demo script | κοινό | `docs/DEMO.md` |
 
-Κανόνας: **κανείς δεν αγγίζει φάκελο του άλλου** χωρίς να του το πει. Το σημείο επαφής είναι μόνο το HTTP API του `docs/CONTRACTS.md`.
-Ο voice agent **δεν** μιλάει ποτέ απευθείας με το mock ERP — μόνο με το App API.
+Κανόνας: **κανείς δεν αγγίζει φάκελο του άλλου** χωρίς να του το πει. Αν ο Νίκος χρειάζεται νέο πεδίο/endpoint → PR στο `docs/CONTRACTS.md`
++ fixture + mock, και ο Δημήτρης το υλοποιεί στο πραγματικό API.
+Ούτε το dashboard ούτε το voice μιλάνε απευθείας με το mock ERP — μόνο με το App API.
 
 ---
 
@@ -53,56 +63,55 @@
 
 **Νίκος**
 - [ ] Twilio λογαριασμός + αριθμός + **verified caller ID** του κινητού του (trial κλήσεις πάνε μόνο σε verified αριθμούς) + Geo permissions για Ελλάδα
-- [ ] **Spike (το πιο ρισκαρισμένο κομμάτι όλου του project):** πραγματική εξερχόμενη κλήση στο κινητό με ConversationRelay, `language=el-GR`, που απλά κάνει echo/απαντά «γεια». Επιβεβαίωση ότι STT και TTS δουλεύουν στα ελληνικά
-- [ ] ngrok/cloudflared tunnel για τα webhooks
+- [ ] **Spike (το πιο ρισκαρισμένο κομμάτι όλου του project):** πραγματική εξερχόμενη κλήση στο κινητό με ConversationRelay, `language=el-GR`, που απλά απαντά «γεια». Επιβεβαίωση ότι STT και TTS δουλεύουν στα ελληνικά
 - [ ] Αν το Greek ConversationRelay δεν δουλεύει μέσα σε ~2 ώρες → Plan B (βλ. `docs/VOICE.md`)
+- [ ] `apps/web`: `create-next-app`, layout, πλοήγηση, client για το App API
 
-### Φάση 1 — Πρώτο submission & βασικός voice loop (Παρ 21:00–02:00)
+### Φάση 1 — Πρώτο submission & βάσεις (Παρ 21:00–02:00)
 
 **Δημήτρης**
 - [ ] Τοπικό **scorer** που αναπαράγει ακριβώς τον κανόνα βαθμολόγησης του README §7 (MAE, ±3, ±7, precision/recall At Risk)
-- [ ] **Backtest harness**: ψεύτικο cutoff (π.χ. 2026-08-02, 2026-05-03, 2025-11-01), «αληθινή» εξάντληση από τα πραγματικά δεδομένα μετά το cutoff, scoring με τον scorer
+- [ ] **Backtest harness**: ψεύτικο cutoff (π.χ. 2026-08-01, 2026-05-02, 2025-11-01), «αληθινή» εξάντληση από τα πραγματικά δεδομένα μετά το cutoff
 - [ ] Baseline (μέσος ρυθμός 180 ημερών) → επιβεβαίωση ότι βγάζει ~16 μέρες MAE στο backtest
 - [ ] **`submissions/team_<όνομα>.csv` v1** με 1.975 γραμμές → commit. Από εδώ και πέρα έχουμε πάντα κάτι να παραδώσουμε
 
 **Νίκος**
-- [ ] `apps/voice`: Node + TypeScript + Fastify, endpoint που επιστρέφει TwiML, WebSocket για ConversationRelay
-- [ ] LLM loop με tool calling, tools υλοποιημένα πάνω στο mock App API (`scripts/mock_app_api.py`)
+- [ ] Σελίδα **At Risk** πάνω στο mock (`GET /api/risk`, `GET /api/suggestions`) με φίλτρα πωλητή / κατηγορίας / περιοχής / urgency
+- [ ] `apps/voice`: Node + TypeScript + Fastify, TwiML endpoint, WebSocket για ConversationRelay, LLM loop με tool calling πάνω στο mock
 - [ ] Ο agent διαβάζει μια πρόταση από το fixture και την περιγράφει στα ελληνικά στο τηλέφωνο
 
-### Φάση 2 — Καλύτερο μοντέλο & πλήρης voice ροή (Σαβ 09:00–14:00)
+### Φάση 2 — Καλύτερο μοντέλο, πραγματικό API, πλήρεις ροές (Σαβ 09:00–14:00)
 
 **Δημήτρης**
 - [ ] Μοντέλο v2: ανακατασκευή αποθέματος από τον κύκλο αγορών (βλ. «Ιδέες αλγορίθμου» παρακάτω)
-- [ ] Εποχικότητα (μήνας × κατηγορία είδους × τύπος/περιοχή πελάτη), αργίες, προσφορές Νοε–Δεκ, cold start από peers
-- [ ] Κάθε βελτίωση: backtest → κρατάμε μόνο ό,τι ρίχνει το MAE. Πίνακας αποτελεσμάτων στο `docs/RESULTS.md`
-- [ ] `suggest.py`: Suggested Order ανά πελάτη (delivery date σε εργάσιμη πριν την εξάντληση, ποσότητα, confidence, evidence) → `data/processed/suggestions.json`
-- [ ] `apps/api` (FastAPI): τα endpoints του `docs/CONTRACTS.md`, διαβάζει τα παραπάνω, SQLite για state/audit
+- [ ] Εποχικότητα, αργίες, προσφορές Νοε–Δεκ, cold start από peers — κάθε βελτίωση στο backtest, γραμμή στο `docs/RESULTS.md`
+- [ ] `suggest.py`: Suggested Order ανά πελάτη (εργάσιμη παράδοση πριν την εξάντληση, ποσότητα, όρια, confidence, evidence) → `data/processed/suggestions.json` στο σχήμα του fixture
+- [ ] `apps/api` (FastAPI): όλα τα endpoints του `docs/CONTRACTS.md` με την ίδια συμπεριφορά με το mock (versions, tokens, idempotency), SQLite για state/audit
 
 **Νίκος**
-- [ ] Όλα τα tools: λίστα προτάσεων, εξήγηση, αλλαγή ποσότητας, επιβεβαίωση, create draft, status
-- [ ] State machine κλήσης, διπλή προφορική επιβεβαίωση πριν από κάθε write
-- [ ] Ο agent εξηγεί **μόνο** από το `evidence` (κανένας αριθμός από το LLM)
+- [ ] Σελίδα **Suggested Orders**: αλλαγή ποσότητας, «Έγκριση» (confirm → create-draft) → δείχνει το ERP draft id
+- [ ] Voice: όλα τα tools, state machine κλήσης, διπλή προφορική επιβεβαίωση, εξήγηση **μόνο** από το `evidence`
 
 ### 🔗 Checkpoint integration (Σαβ 14:00)
 - Ο Δημήτρης έχει το πραγματικό API στο `:8000` με τα ίδια σχήματα με το fixture
-- Ο Νίκος αλλάζει `APP_API_URL` από το mock στο πραγματικό → end-to-end: κλήση → αλλαγή ποσότητας → draft στο ERP → `team_pack/draft_orders/DRAFT-*.json`
+- Ο Νίκος σταματάει το mock → dashboard και voice δουλεύουν με πραγματικές προβλέψεις
+- End-to-end: έγκριση από dashboard **και** από κλήση → `team_pack/draft_orders/DRAFT-*.json`
 
-### Φάση 3 — Dashboard & σταθεροποίηση voice (Σαβ 14:00–22:00)
+### Φάση 3 — Ολοκλήρωση & σταθεροποίηση (Σαβ 14:00–22:00)
 
 **Δημήτρης**
-- [ ] `apps/web` (Next.js): Overview, At Risk (φίλτρα πωλητή/κατηγορίας/περιοχής/urgency), Customer detail (timeline αγορών + forecast + factors), Suggested Orders (edit qty, approve → ERP draft id), Evaluation (baseline vs μοντέλο)
-- [ ] LLM εξήγηση στο dashboard (grounded σε evidence)
-- [ ] Κουμπί «Κάλεσε τον πωλητή» → `POST {VOICE_URL}/voice/calls`
+- [ ] `GET /api/suggestions/{id}/explanation`: ελληνική εξήγηση από LLM, grounded στο evidence
+- [ ] `GET /api/customers/{trdr}/history` και `GET /api/evaluation` με πραγματικά δεδομένα
+- [ ] Συνέχεια στο μοντέλο (το MAE είναι 30% του βαθμού) + integration tests του API (διπλό create-draft, λάθος version, εκτός ορίων)
 
 **Νίκος**
-- [ ] Σελίδα `apps/web/app/voice/`: ουρά κλήσεων, status, σύντομο transcript, draft id (διαβάζει `GET /api/calls`)
-- [ ] Edge cases: voicemail, κλείσιμο γραμμής, «15» vs «50», διακοπές, διπλό webhook → **ποτέ** διπλό draft
-- [ ] Allowlist αριθμών, quiet hours, AI disclosure στην αρχή της κλήσης
+- [ ] Σελίδες **Customer detail** (timeline αγορών + forecast + factors + εξήγηση), **Evaluation** (baseline vs μοντέλο), **Overview**
+- [ ] Σελίδα **Voice Operations** (ουρά κλήσεων, status, transcript, draft id) + κουμπί «Κάλεσε τον πωλητή»
+- [ ] Voice edge cases: voicemail, κλείσιμο γραμμής, «15» vs «50», διπλό webhook → **ποτέ** διπλό draft· allowlist, quiet hours, AI disclosure
 
 ### Φάση 4 — Τελικά (Κυρ 08:00–13:00)
 **Δημήτρης**: τελικό submission (ξανατρέξιμο από καθαρό clone), `docs/RESULTS.md`, README, run-all script
-**Νίκος**: 3 πρόβες της κλήσης στο δωμάτιο, **ηχογράφηση fallback** (σε περίπτωση που δεν πιάνει σήμα/Twilio), demo seed
+**Νίκος**: polish του dashboard, 3 πρόβες της κλήσης, **ηχογράφηση fallback**, «Run demo scenario» με σταθερό seed
 **Κοινό**: `docs/DEMO.md` (storyboard 2,5'), slides, πρόβα με χρονόμετρο. **13:00 code freeze.**
 
 ---
