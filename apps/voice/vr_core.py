@@ -324,8 +324,9 @@ class CallSession:
         self.pending[suggestion_id] = s["version"]
         await self.set_status("confirming", suggestion_id=suggestion_id)
         return {"status": "awaiting_confirmation", "say": read_back(s),
-                "message": "Διάβασε αυτό το κείμενο αυτούσιο και ΠΕΡΙΜΕΝΕ σαφές «ναι, επιβεβαιώνω». "
-                           "Μόνο τότε κάλεσε place_draft_order. Σε οτιδήποτε άλλο, ΜΗΝ το καλέσεις."}
+                "message": "Διάβασε το «say» ΟΛΟΚΛΗΡΟ και αυτούσιο, τελείωσε με την ερώτηση και ΣΤΑΜΑΤΑ. "
+                           "ΤΙΠΟΤΑ δεν έχει δημιουργηθεί: μην πεις «προχωράμε» ή «θα δημιουργηθεί». "
+                           "Μόνο αν ο πωλητής απαντήσει ΜΕΤΑ την ερώτηση καθαρά «ναι» → place_draft_order."}
 
     async def place_draft_order(self, suggestion_id: str) -> dict:
         """Βήμα 2/2: μετά από ρητό «ναι» στην περίληψη → confirm + create-draft, exactly-once."""

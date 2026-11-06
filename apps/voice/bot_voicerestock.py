@@ -168,17 +168,26 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
 === ΠΟΡΕΙΑ ΚΛΗΣΗΣ ===
 {start}
 1. {greeting}
+   (Αν στην αρχή ακούσεις «ναι;», «εμπρός», «παρακαλώ», «λέγετε»: σήκωσε το τηλέφωνο. Πες ΑΜΕΣΩΣ το βήμα 1,
+   όχι «ακούω».)
 2. Αν πει ναι: ξεκίνα από τον πρώτο πελάτη της λίστας. Πες τι τελειώνει και πότε, την πρόταση και την
-   παράδοση. Μετά ρώτα: «Θέλετε να σας πω γιατί, ή να την περάσω;»
+   παράδοση. Αν έχει πολλά είδη, πες πρώτα τα δύο πιο επείγοντα και ότι υπάρχουν κι άλλα.
+   Μετά ρώτα: «Θέλετε να σας πω γιατί, ή να την περάσω;»
    - «Γιατί;» / «από πού βγαίνει;» → ζήτα από το backend την εξήγηση και πες τη σύντομα.
    - Αλλαγή ποσότητας («κάν' τα δεκαπέντε») → ζήτα από το backend να την αλλάξει και πες το αποτέλεσμα
      όπως σου το δίνει. Αν το backend σου δώσει ερώτηση επιβεβαίωσης του αριθμού, κάνε ΑΚΡΙΒΩΣ αυτή.
-   - «Πέρασέ τη» / «φτιάξ' την» / «εντάξει, προχώρα» → ζήτα από το backend να ετοιμάσει την επιβεβαίωση.
-     Διάβασε ΑΥΤΟΥΣΙΑ την περίληψη που σου δίνει και περίμενε απάντηση.
-   - ΜΟΝΟ αν στην περίληψη απαντήσει καθαρά «ναι», «ναι, επιβεβαιώνω» ή «σωστά» → ζήτα από το backend να
-     δημιουργήσει το draft. Σε ασαφή απάντηση («οκ;», «μμ», «ε;») ρώτα ξανά. Αν αλλάξει κάτι, κάνε πρώτα την αλλαγή.
-   - Λες ότι έγινε ΜΟΝΟ όταν το backend σου πει ότι το ERP δημιούργησε το draft, με τα λόγια του backend.
+   - «Πέρασέ τη» / «φτιάξ' την» / «βάλ' τη σε draft» / «εντάξει, προχώρα» → ζήτα από το backend να ετοιμάσει
+     την επιβεβαίωση. Διάβασε ΟΛΟΚΛΗΡΗ και ΑΥΤΟΥΣΙΑ την περίληψη που σου δίνει (όλα τα είδη), τελείωσε με την
+     ερώτησή της και ΣΤΑΜΑΤΑ να μιλάς. Μην προσθέσεις τίποτα μετά την ερώτηση.
+   - ΜΟΝΟ αν ΜΕΤΑ την περίληψη απαντήσει καθαρά «ναι», «ναι, επιβεβαιώνω» ή «σωστά» → ζήτα από το backend να
+     δημιουργήσει το draft. Ό,τι είπε ΠΡΙΝ την περίληψη δεν μετράει ως επιβεβαίωση. Σε ασαφή απάντηση
+     («οκ;», «μμ», «ε;») ρώτα ξανά. Αν αλλάξει κάτι, κάνε πρώτα την αλλαγή.
+   - ΑΠΑΓΟΡΕΥΕΤΑΙ να πεις «προχωράμε», «θα δημιουργηθεί», «καταχωρήθηκε», «έγινε» ή κάτι παρόμοιο για
+     παραγγελία, πριν το backend σου πει ότι το ERP δημιούργησε το draft. Τότε το λες με τα λόγια του backend.
      Αν αποτύχει, λες καθαρά ότι ΔΕΝ δημιουργήθηκε και ότι θα το δει στο dashboard.
+   - «Θα το επιβεβαιώσω αργότερα» / «είμαι στο δρόμο»: πες ότι ΔΕΝ δημιουργήθηκε τίποτα και ότι οι προτάσεις
+     μένουν ανοιχτές στο dashboard για όποτε μπορεί. Μη ζητήσεις ξανά επιβεβαίωση.
+   - «Πέρασέ τες όλες»: μία-μία, με περίληψη και «ναι» για την καθεμία.
    - «Επόμενο» / «άσ' το» → πήγαινε στον επόμενο πελάτη της λίστας.
 3. Όταν τελειώσει η λίστα ή σου πει ότι φτάνει: σύντομος αποχαιρετισμός, και ζήτα από το backend να κλείσει την κλήση.
 
@@ -249,9 +258,18 @@ class CallWatch(FrameProcessor):
             self._said.clear()
             logger.info(f"{self._tag} Agent: {said}" if LOG_TRANSCRIPTS else f"{self._tag} Agent μίλησε ({len(said)} χαρ.)")
             self._post(type="transcript", role="agent", text=said)
-        elif isinstance(frame, TranscriptionFrame):
+        await self.push_frame(frame, direction)
+
+
+class UserWatch(CallWatch):
+    """Τα λόγια του πωλητή. Το gpt-live τα στέλνει ως TranscriptionFrame ΠΡΟΣ ΤΑ ΠΙΣΩ (UPSTREAM), άρα αυτός ο
+    observer μπαίνει ΠΡΙΝ από το live_llm — ο CallWatch στο τέλος της ροής δεν τα βλέπει ποτέ."""
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        await FrameProcessor.process_frame(self, frame, direction)
+        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             logger.info(f"{self._tag} Πωλητής: {frame.text}" if LOG_TRANSCRIPTS else f"{self._tag} Πωλητής μίλησε")
-            self._post(type="transcript", role="user", text=frame.text)
+            self._post(type="transcript", role="user", text=frame.text.strip())
             if self._session and self._session.status == "greeted":
                 self._session.status = "discussing"
                 self._post(type="status", status="discussing")
@@ -358,7 +376,8 @@ async def converse(room_name: str, session: CallSession | None, name: str, phone
         params=LiveKitParams(audio_in_enabled=True, audio_out_enabled=True),
     )
     task = PipelineTask(
-        Pipeline([transport.input(), live_llm, transport.output(), CallWatch(state, session, tag)]),
+        Pipeline([transport.input(), UserWatch(state, session, tag), live_llm, transport.output(),
+                  CallWatch(state, session, tag)]),
         params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
     )
 
