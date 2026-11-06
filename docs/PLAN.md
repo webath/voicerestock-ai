@@ -57,9 +57,9 @@
 **Κοινό (15')**: clone repo, διαβάστε `README.md`, `CLAUDE.md`, `docs/CONTRACTS.md`. Ξεκινήστε `python3 team_pack/mock_erp_server.py`.
 
 **Δημήτρης**
-- [ ] Python env (`brew install uv` → `cd services/forecast && uv sync`)
-- [ ] `ingest.py`: φόρτωση SALDOC + MTRLINES, join σε FINDOC, κανόνες καθαρισμού (βλ. `docs/DATA_NOTES.md`), report με counts πριν/μετά από κάθε φίλτρο
-- [ ] Tests για τους κανόνες: 0 ακυρωμένα, πιστωτικά αρνητικά, free goods μέσα, μεταφορικά έξω
+- [x] Python env (`brew install uv` → `cd services/forecast && uv sync`)
+- [x] `ingest.py`: φόρτωση SALDOC + MTRLINES, join σε FINDOC, κανόνες καθαρισμού (βλ. `docs/DATA_NOTES.md`), report με counts πριν/μετά από κάθε φίλτρο
+- [x] Tests για τους κανόνες: 0 ακυρωμένα, πιστωτικά αρνητικά, free goods μέσα, μεταφορικά έξω
 
 **Νίκος**
 - [ ] Twilio λογαριασμός + αριθμός + **verified caller ID** του κινητού του (trial κλήσεις πάνε μόνο σε verified αριθμούς) + Geo permissions για Ελλάδα
@@ -70,10 +70,10 @@
 ### Φάση 1 — Πρώτο submission & βάσεις (Παρ 21:00–02:00)
 
 **Δημήτρης**
-- [ ] Τοπικό **scorer** που αναπαράγει ακριβώς τον κανόνα βαθμολόγησης του README §7 (MAE, ±3, ±7, precision/recall At Risk)
-- [ ] **Backtest harness**: ψεύτικο cutoff (π.χ. 2026-08-01, 2026-05-02, 2025-11-01), «αληθινή» εξάντληση από τα πραγματικά δεδομένα μετά το cutoff
-- [ ] Baseline (μέσος ρυθμός 180 ημερών) → επιβεβαίωση ότι βγάζει ~16 μέρες MAE στο backtest
-- [ ] **`submissions/team_<όνομα>.csv` v1** με 1.975 γραμμές → commit. Από εδώ και πέρα έχουμε πάντα κάτι να παραδώσουμε
+- [x] Τοπικό **scorer** που αναπαράγει ακριβώς τον κανόνα βαθμολόγησης του README §7 (MAE, ±3, ±7, precision/recall At Risk)
+- [x] **Backtest harness**: ψεύτικο cutoff (π.χ. 2026-08-01, 2026-05-02, 2025-11-01), «αληθινή» εξάντληση από τα πραγματικά δεδομένα μετά το cutoff
+- [x] Baseline (μέσος ρυθμός 180 ημερών) → επιβεβαίωση ότι βγάζει ~16 μέρες MAE στο backtest
+- [x] **`submissions/team_<όνομα>.csv` v1** με 1.975 γραμμές → commit. Από εδώ και πέρα έχουμε πάντα κάτι να παραδώσουμε
 
 **Νίκος**
 - [ ] Σελίδα **At Risk** πάνω στο mock (`GET /api/risk`, `GET /api/suggestions`) με φίλτρα πωλητή / κατηγορίας / περιοχής / urgency
@@ -84,7 +84,8 @@
 
 **Δημήτρης**
 - [ ] Μοντέλο v2: ανακατασκευή αποθέματος από τον κύκλο αγορών (βλ. «Ιδέες αλγορίθμου» παρακάτω)
-- [ ] Εποχικότητα, αργίες, προσφορές Νοε–Δεκ, cold start από peers — κάθε βελτίωση στο backtest, γραμμή στο `docs/RESULTS.md`
+- [x] Εποχικότητα (`seasonal_yoy` + `hybrid_0.6`, MAE backtest 3,78)
+- [ ] Αργίες, προσφορές Νοε–Δεκ, cold start από peers — κάθε βελτίωση στο backtest, γραμμή στο `docs/RESULTS.md`
 - [ ] `suggest.py`: Suggested Order ανά πελάτη (εργάσιμη παράδοση πριν την εξάντληση, ποσότητα, όρια, confidence, evidence) → `data/processed/suggestions.json` στο σχήμα του fixture
 - [ ] `apps/api` (FastAPI): όλα τα endpoints του `docs/CONTRACTS.md` με την ίδια συμπεριφορά με το mock (versions, tokens, idempotency), SQLite για state/audit
 

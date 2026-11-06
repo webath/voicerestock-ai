@@ -93,9 +93,24 @@ def cadence(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.D
     gap = buys.groupby(["TRDR", "MTRL"])["DATE"].diff().dt.days
     med = gap.groupby([buys["TRDR"], buys["MTRL"]]).median().rename("interval").reset_index()
     x = tg.merge(med, how="left").merge(_last_buy(h), how="left")
-    x["DATE"] = x["last_date"] + pd.to_timedelta(x["interval"], unit="D")
+    x["DATE"] = x["last_date"] + pd.to_timedelta(np.ceil(x["interval"]), unit="D")
     x.loc[x["DATE"] <= c, "DATE"] = c + pd.Timedelta(days=1)
     return x[["TRDR", "MTRL", "DATE"]]
+
+
+def hybrid(w_cadence: float = 0.5):
+    """«Καμία εξάντληση» από το seasonal_yoy (πιάνει τα ζεύγη που σταματούν τον χειμώνα)·
+    ημερομηνία = σταθμισμένος μέσος cadence και seasonal_yoy."""
+    def f(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
+        y = seasonal_yoy(d, h, tg, c).rename(columns={"DATE": "y"})
+        k = cadence(d, h, tg, c).rename(columns={"DATE": "k"})
+        x = y.merge(k, on=["TRDR", "MTRL"])
+        k_days = (x["k"] - c).dt.days.fillna((x["y"] - c).dt.days)
+        days = (w_cadence * k_days + (1 - w_cadence) * (x["y"] - c).dt.days).round().clip(lower=1)
+        x["DATE"] = (c + pd.to_timedelta(days, unit="D")).where(x["y"].notna())
+        return x[["TRDR", "MTRL", "DATE"]]
+    f.__name__ = f"hybrid_{w_cadence}"
+    return f
 
 
 REGISTRY = {
@@ -104,4 +119,7 @@ REGISTRY = {
     "seasonal_group": seasonal_group,
     "seasonal_yoy": seasonal_yoy,
     "cadence": cadence,
+    "hybrid_0.6": hybrid(0.6),
 }
+
+DEFAULT_MODEL = "hybrid_0.6"

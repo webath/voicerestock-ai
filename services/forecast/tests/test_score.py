@@ -32,3 +32,11 @@ def test_at_risk_precision_recall():
     pred = df([(1, 1, "2026-11-06"), (1, 2, "2026-11-10")])
     s = score(pred, truth, C)
     assert s["at_risk_precision"] == 0.5 and s["at_risk_recall"] == 1.0
+
+
+def test_submission_matches_template():
+    from forecast.submit import build
+    out = build()
+    assert len(out) == 1975 and list(out.columns) == ["TRDR", "MTRL", "PREDICTED_DEPLETION_DATE", "SUGGESTED_QTY"]
+    dates = pd.to_datetime(out["PREDICTED_DEPLETION_DATE"])
+    assert (dates.dropna() > C).all() and (dates.dropna() < H).all()

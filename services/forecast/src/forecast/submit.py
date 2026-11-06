@@ -1,6 +1,6 @@
 """Γράφει το submission στο ακριβές format του submission_template.csv.
 
-    uv run python -m forecast.submit [--model seasonal_yoy] [--team <όνομα>]
+    uv run python -m forecast.submit [--model hybrid_0.6] [--team <όνομα>]
 """
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ import pandas as pd
 
 from .ingest import CUTOFF, DATA, ROOT, load
 from .backtest import history
-from .models import REGISTRY
+from .models import DEFAULT_MODEL, REGISTRY
 
 
-def build(model: str = "seasonal_yoy") -> pd.DataFrame:
+def build(model: str = DEFAULT_MODEL) -> pd.DataFrame:
     d = load()
     template = pd.read_csv(DATA / "submission_template.csv", encoding="utf-8-sig")
     tg = template[["TRDR", "MTRL"]]
@@ -32,7 +32,7 @@ def build(model: str = "seasonal_yoy") -> pd.DataFrame:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="seasonal_yoy", choices=list(REGISTRY))
+    ap.add_argument("--model", default=DEFAULT_MODEL, choices=list(REGISTRY))
     ap.add_argument("--team", default="voicerestock")
     a = ap.parse_args()
     out = build(a.model)
