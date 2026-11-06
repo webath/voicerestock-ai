@@ -73,7 +73,7 @@ Twilio ⇄ Voice :8100 ──HTTP──▶ App API :8000 ──HTTP──▶ Moc
 
 ```jsonc
 {
-  "model_version": "hybrid_0.6@2026-11-06",
+  "model_version": "hybrid_0.7@2026-11-06",
   "burn_rate_per_day": 0.57,        // μελλοντικός ρυθμός (μονάδες MTRUNIT1/μέρα)
   "burn_rate_recent_per_day": 0.74, // ρυθμός τελευταίων 90 ημερών
   "last_purchase_date": "2026-10-24",

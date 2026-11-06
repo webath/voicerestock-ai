@@ -23,6 +23,9 @@ Model = Callable[[Data, pd.DataFrame, pd.DataFrame, pd.Timestamp], pd.DataFrame]
 
 
 def history(d: Data, cutoff: pd.Timestamp) -> pd.DataFrame:
+    if "in_promo" not in d.daily:
+        from .models import promo_mask
+        d.daily["in_promo"] = promo_mask(d, d.daily)
     return d.daily[d.daily["DATE"] <= cutoff]
 
 

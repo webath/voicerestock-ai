@@ -101,7 +101,8 @@ def test_read_endpoints(env):
     assert h["items"][0]["points"]
     e = c.get(f"/api/suggestions/{sid}/explanation").json()
     assert e["source"] == "template" and s["CUSTOMER_NAME"] in e["text"]
-    assert c.get("/api/evaluation").json()["default_model"] == "hybrid_0.6"
+    ev = c.get("/api/evaluation").json()
+    assert ev["default_model"] in {r["model"] for r in ev["rows"]}
     c.post("/api/calls/events", json={"call_sid": "CA9", "status": "discussing", "role": "agent", "text": "Γεια"})
     assert c.get("/api/calls").json()[0]["transcript"][0]["text"] == "Γεια"
     assert c.get("/api/suggestions/NOPE").status_code == 404
