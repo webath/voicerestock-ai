@@ -45,6 +45,9 @@ def load_history():
 
 
 ITEMS, HISTORY = load_history()
+SALESMEN = {int(r['PRSN']): r['NAME'] for r in _rd('PRSN.csv')}
+# «Σήμερα» του σεναρίου (README: «Σήμερα είναι 1/11/2026»). Από εδώ μετράει το days_left του /api/risk.
+TODAY = os.environ.get('SCENARIO_TODAY', '2026-11-01')
 TARGETS = {}
 for r in _rd('prediction_targets.csv'): TARGETS.setdefault(int(r['TRDR']), []).append(int(r['MTRL']))
 
@@ -66,6 +69,12 @@ def mock_explanation(s):
 
 
 def now(): return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def days_between(a, b):
+    if not b: return None
+    from datetime import date
+    return (date.fromisoformat(b) - date.fromisoformat(a)).days
 
 
 def audit(actor, action, sid, outcome):
@@ -114,9 +123,8 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}; p = u.path.rstrip('/')
         if p == '/api/health': return self.send(200, {'ok': True, 'mock': True})
         if p == '/api/salesmen':
-            ids = sorted({s['SALESMAN'] for s in SUGS.values()})
-            return self.send(200, [{'PRSN': i, 'NAME': next(s['SALESMAN_NAME'] for s in SUGS.values() if s['SALESMAN'] == i),
-                                    'phone': os.environ.get(f'SALESMAN_{i}_PHONE')} for i in ids])
+            return self.send(200, [{'PRSN': i, 'NAME': n, 'phone': os.environ.get(f'SALESMAN_{i}_PHONE')}
+                                   for i, n in sorted(SALESMEN.items())])
         if p == '/api/suggestions':
             rows = [s for s in SUGS.values()
                     if ('salesman' not in q or str(s['SALESMAN']) == q['salesman']) and ('status' not in q or s['status'] == q['status'])]
@@ -124,6 +132,7 @@ class H(BaseHTTPRequestHandler):
         if p == '/api/risk':
             rows = [{'TRDR': s['TRDR'], 'CUSTOMER_NAME': s['CUSTOMER_NAME'], 'SALESMAN': s['SALESMAN'], 'MTRL': l['MTRL'],
                      'ITEM_NAME': l['ITEM_NAME'], 'PREDICTED_DEPLETION_DATE': l['PREDICTED_DEPLETION_DATE'],
+                     'days_left': days_between(TODAY, l['PREDICTED_DEPLETION_DATE']),
                      'CONFIDENCE': l['CONFIDENCE'], 'urgency': s['urgency'], 'suggestion_id': s['id']}
                     for s in SUGS.values() for l in s['LINES'] if 'salesman' not in q or str(s['SALESMAN']) == q['salesman']]
             rows.sort(key=lambda r: r['PREDICTED_DEPLETION_DATE'])
@@ -210,9 +219,13 @@ class H(BaseHTTPRequestHandler):
             # create-draft
             key = b.get('idempotency_key')
             if not key: return self.err(400, 'bad_request', 'idempotency_key required')
+            key = (sid, key)   # το ίδιο key σε άλλη πρόταση ΔΕΝ πρέπει να επιστρέφει το draft αυτής
             if key in IDEMP: return self.send(200, IDEMP[key])
             if s['status'] == 'draft_created':
                 return self.send(200, {'erp_draft_id': s['erp_draft_id'], 'status': 'draft_created'})
+            # Ένα αίτημα είναι ήδη στο ERP (π.χ. διπλό webhook/retry): ΚΑΝΕΝΑ δεύτερο POST.
+            if s['status'] == 'posting':
+                return self.err(409, 'in_progress', 'create-draft already in progress for this suggestion')
             t = TOKENS.get(b.get('confirmation_token'))
             if not t or t != (sid, s['version']): return self.err(409, 'not_confirmed', 'missing/stale confirmation_token')
             s['status'] = 'posting'
@@ -227,6 +240,8 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(); ap.add_argument('--port', type=int, default=8000); a = ap.parse_args()
-    print(f'Mock App API on http://localhost:{a.port}  (fixture: {FIXTURE}, ERP: {ERP})')
-    ThreadingHTTPServer(('0.0.0.0', a.port), H).serve_forever()
+    ap = argparse.ArgumentParser(); ap.add_argument('--port', type=int, default=8000)
+    # Στο VPS (host networking, χωρίς firewall) τρέχει με --host 127.0.0.1 ώστε να μη βγαίνει στο internet.
+    ap.add_argument('--host', default='0.0.0.0'); a = ap.parse_args()
+    print(f'Mock App API on http://{a.host}:{a.port}  (fixture: {FIXTURE}, ERP: {ERP})')
+    ThreadingHTTPServer((a.host, a.port), H).serve_forever()

@@ -1,0 +1,11 @@
+# Override για το hackathon VoiceRestock: ίδιο container (greek-agent, host networking, .env), άλλο bot.
+# Χρήση ΜΟΝΟ μέσω deploy.sh / rollback.sh, πάντα μαζί με το docker-compose.yml του receptionist:
+#   docker compose --project-directory /root/greek-voice-agent \
+#     -f /root/greek-voice-agent/docker-compose.yml -f <αυτό το αρχείο> up -d --no-build agent
+services:
+  agent:
+    image: greek-agent:voicerestock
+    command: ["python", "bot_voicerestock.py"]
+    env_file:
+      - /root/greek-voice-agent/.env
+      - /root/voicerestock/voicerestock.env
