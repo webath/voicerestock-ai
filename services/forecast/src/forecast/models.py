@@ -107,9 +107,17 @@ def peer_interval(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -
 
 
 # Ρυθμίσεις που αλλάζουν τα πειράματα (docs/RESULTS.md). Οι default είναι οι επικυρωμένες.
-CFG = {"cold_rate": "cycle", "peer_cold_start": True,
-       "qty_scaled_cadence": "promo", # "off" | "promo" (μόνο αν η τελευταία αγορά ήταν σε προσφορά) | "all"
-       "promo_rate": False}           # ρυθμός χωρίς τις αγορές μέσα σε προσφορές   # "window": qty/90 μέρες · "cycle": ρυθμός κύκλου για ζεύγη χωρίς περσινό ιστορικό · "cycle_all": για όλα
+CFG = {"cold_rate": "cycle",          # "window": qty/90 μέρες · "cycle": ρυθμός κύκλου για ζεύγη χωρίς περσινό ιστορικό · "cycle_all": για όλα
+       "peer_cold_start": True,         # cold start: κύκλος από πελάτες ίδιου τύπου για το ίδιο είδος
+       "qty_scaled_cadence": "promo",   # "off" | "promo" (μόνο αν η τελευταία αγορά ήταν σε προσφορά) | "all" — αγνοείται αν promo_cycle_mult
+       "promo_cycle_mult": 1.8,         # αριθμός: κύκλος μετά από αγορά σε προσφορά = διάστημα × αυτό (αντί για κλιμάκωση ποσότητας)
+       "interval_excl_promo": False,    # διάμεσο διάστημα μόνο από διαστήματα που ΔΕΝ ξεκινούν από αγορά σε προσφορά
+       "interval_stat": "median",       # "median" (180 μέρες) | "recent4": διάμεσος 4 τελευταίων διαστημάτων | "mean" | "blend"
+       "overdue_floor": 3,              # αν ο κύκλος έχει ήδη περάσει: επόμενη αγορά το νωρίτερο cutoff + τόσες μέρες
+       "interval_beta": 1.0,            # <1: ήπια συρρίκνωση της κλίμακας κύκλου προς 14 μέρες (κύκλος × (14/κύκλος)^(1−β))
+       "shift_days": 3.0,               # εξάντληση = πρόβλεψη επόμενης αγοράς + shift_days + shift_frac × κύκλος
+       "shift_frac": 0.0,               #   (ο πελάτης ξαναπαραγγέλνει πριν μηδενίσει: απόθεμα ασφαλείας)
+       "promo_rate": False}             # ρυθμός χωρίς τις αγορές μέσα σε προσφορές
 
 
 def _yoy_frame(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
@@ -149,9 +157,24 @@ def _cadence_frame(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) 
     buys = h[h["gross"] > 0].sort_values("DATE")
     buys = buys[buys["DATE"] > c - pd.Timedelta(days=180)]
     gap = buys.groupby(["TRDR", "MTRL"])["DATE"].diff().dt.days
+    if CFG.get("interval_excl_promo") and "in_promo" in buys:
+        prev_promo = buys.groupby(["TRDR", "MTRL"])["in_promo"].shift(1).fillna(False).astype(bool)
+        clean = gap.where(~prev_promo)
+        # κρατάμε τα «καθαρά» διαστήματα όπου υπάρχουν· αλλιώς όλα
+        has_clean = clean.groupby([buys["TRDR"], buys["MTRL"]]).transform("count") > 0
+        gap = clean.where(has_clean, gap)
     grp = gap.groupby([buys["TRDR"], buys["MTRL"]])
+    stat = CFG.get("interval_stat", "median")
+    if stat == "median":
+        iv_est = grp.median()
+    elif stat == "mean":
+        iv_est = grp.mean()
+    elif stat == "blend":
+        iv_est = 0.5 * grp.median() + 0.5 * grp.mean()
+    elif stat == "recent4":
+        iv_est = gap.dropna().groupby([buys["TRDR"], buys["MTRL"]]).apply(lambda s: s.iloc[-4:].median())
     np_buys = buys[~buys["in_promo"]] if "in_promo" in buys else buys
-    stats = pd.DataFrame({"interval": grp.median(), "interval_cv": grp.std() / grp.mean(),
+    stats = pd.DataFrame({"interval": iv_est, "interval_cv": grp.std() / grp.mean(),
                           "n_recent": buys.groupby(["TRDR", "MTRL"]).size(),
                           "qty_recent_median": buys.groupby(["TRDR", "MTRL"])["gross"].median(),
                           "qty_normal_median": np_buys.groupby(["TRDR", "MTRL"])["gross"].median(),
@@ -162,14 +185,18 @@ def _cadence_frame(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) 
     x["last_in_promo"] = (x.set_index(["TRDR", "MTRL"]).index.map(lp).fillna(False).astype(bool)) if lp is not None else False
     if CFG["peer_cold_start"]:
         x["interval"] = x["interval"].fillna(pd.Series(peer_interval(d, h, tg, c), index=x.index))
-    x["interval_used"] = x["interval"]
+    beta = CFG.get("interval_beta", 1.0)
+    x["interval_used"] = x["interval"] * (14.0 / x["interval"]) ** (1 - beta)
     mode = CFG["qty_scaled_cadence"]
-    if mode != "off":
+    if CFG.get("promo_cycle_mult"):
+        x.loc[x["last_in_promo"], "interval_used"] = x.loc[x["last_in_promo"], "interval_used"] * CFG["promo_cycle_mult"]
+    elif mode != "off":
         scale = (x["last_qty"] / x["qty_normal_median"].fillna(x["qty_recent_median"])).clip(0.5, 3).fillna(1.0)
         apply = x["last_in_promo"] if mode == "promo" else pd.Series(True, index=x.index)
-        x.loc[apply, "interval_used"] = x.loc[apply, "interval"] * scale[apply]
+        x.loc[apply, "interval_used"] = x.loc[apply, "interval_used"] * scale[apply]
     x["DATE"] = x["last_date"] + pd.to_timedelta(np.ceil(x["interval_used"]), unit="D")
-    x.loc[x["DATE"] <= c, "DATE"] = c + pd.Timedelta(days=1)
+    floor = c + pd.Timedelta(days=CFG.get("overdue_floor", 1))
+    x.loc[x["DATE"] < floor, "DATE"] = floor
     return x
 
 
@@ -178,7 +205,10 @@ def cadence(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.D
     return _cadence_frame(d, h, tg, c)[["TRDR", "MTRL", "DATE"]]
 
 
-def components(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp, w_cadence: float = 0.7) -> pd.DataFrame:
+W_CADENCE = 0.9   # βάρος cadence στο hybrid (v3)
+
+
+def components(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp, w_cadence: float = W_CADENCE) -> pd.DataFrame:
     """Όλα τα ενδιάμεσα του hybrid (για evidence / suggestions). Η στήλη DATE είναι η πρόβλεψη."""
     y = _yoy_frame(d, h, tg, c).rename(columns={"DATE": "date_yoy"})
     k = _cadence_frame(d, h, tg, c)[["TRDR", "MTRL", "DATE", "interval", "interval_used", "interval_cv", "n_recent",
@@ -186,7 +216,9 @@ def components(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp, w_ca
     x = y.merge(k, on=["TRDR", "MTRL"], how="left")
     yd = (x["date_yoy"] - c).dt.days
     kd = (x["date_cadence"] - c).dt.days.fillna(yd)
-    days = (w_cadence * kd + (1 - w_cadence) * yd).round().clip(lower=1)
+    iv = x["interval"].fillna(x["peer_interval"]).fillna(14.0)
+    shift = CFG.get("shift_days", 0.0) + CFG.get("shift_frac", 0.0) * iv
+    days = (w_cadence * kd + (1 - w_cadence) * yd + shift).round().clip(lower=1)
     x["DATE"] = (c + pd.to_timedelta(days, unit="D")).where(x["date_yoy"].notna())
     return x
 
@@ -200,14 +232,30 @@ def hybrid(w_cadence: float = 0.5):
     return f
 
 
+def with_cfg(fn, name: str, **over):
+    """Το ίδιο μοντέλο με άλλες ρυθμίσεις CFG (για σύγκριση με παλιές εκδόσεις)."""
+    def f(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) -> pd.DataFrame:
+        old = dict(CFG)
+        CFG.update(over)
+        try:
+            return fn(d, h, tg, c)
+        finally:
+            CFG.clear(); CFG.update(old)
+    f.__name__ = name
+    return f
+
+
+# v2 = submission της 6/11: κλιμάκωση κύκλου με την ποσότητα της προσφοράς, χωρίς ελάχιστο, χωρίς μετατόπιση, βάρος 0,7
+V2 = {"promo_cycle_mult": None, "overdue_floor": 1, "shift_days": 0.0}
+
 REGISTRY = {
     "cutoff+30": cutoff_plus_30,
     "baseline_180": baseline_180,
     "seasonal_group": seasonal_group,
     "seasonal_yoy": seasonal_yoy,
     "cadence": cadence,
-    "hybrid_0.6": hybrid(0.6),
-    "hybrid_0.7": hybrid(0.7),
+    "hybrid_v2": with_cfg(hybrid(0.7), "hybrid_v2", **V2),
+    "hybrid_v3": hybrid(W_CADENCE),
 }
 
-DEFAULT_MODEL = "hybrid_0.7"
+DEFAULT_MODEL = "hybrid_v3"

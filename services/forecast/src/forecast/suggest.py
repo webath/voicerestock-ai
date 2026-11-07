@@ -16,14 +16,14 @@ import math
 import numpy as np
 import pandas as pd
 
-from .backtest import CUTOFFS, history, targets, truth_next_purchase
+from .backtest import CUTOFFS, TRUTHS, history, targets, truth_next_purchase
 from .ingest import CUTOFF, PROCESSED, Data, load
 from .models import DEFAULT_MODEL, components
 from .score import pair_errors
 
 TODAY = pd.Timestamp("2026-11-01")            # «Σήμερα είναι 1/11/2026» (README)
 LOOKAHEAD_DAYS = 21
-MODEL_VERSION = f"{DEFAULT_MODEL}@2026-11-06"
+MODEL_VERSION = f"{DEFAULT_MODEL}@2026-11-07"
 CV_BINS = [-np.inf, 0.15, 0.35, 0.6, np.inf]
 CV_LABELS = ["πολύ σταθερός", "σταθερός", "μέτριος", "ασταθής"]
 
@@ -58,7 +58,7 @@ def calibrate_confidence(d: Data) -> pd.Series:
     for c in CUTOFFS:
         h, tg = history(d, c), targets(d, c)
         comp = components(d, h, tg, c)
-        m = pair_errors(comp[["TRDR", "MTRL", "DATE"]], truth_next_purchase(d, c, tg), c)
+        m = pair_errors(comp[["TRDR", "MTRL", "DATE"]], truth_next_purchase(d, c, tg, *TRUTHS["calibrated"]), c)
         m["cv_bin"] = pd.cut(comp["interval_cv"].fillna(1.0), CV_BINS, labels=CV_LABELS).values
         m["has_ly"] = comp["has_ly"].values
         rows.append(m)
@@ -97,7 +97,7 @@ def evidence(d: Data, row, cold: bool, peer: str | None) -> dict:
         factors.append({"name": "purchase_cycle", "impact_days": None, "source": src})
     if row.last_in_promo and row.interval_used > row.interval:
         factors.append({"name": "promo_stockpile", "impact_days": _r(row.interval_used - row.interval, 1),
-                        "source": "η τελευταία αγορά έγινε σε προσφορά με μεγαλύτερη ποσότητα από το συνηθισμένο — το απόθεμα κρατά περισσότερο"})
+                        "source": "η τελευταία αγορά έγινε σε προσφορά — στο ιστορικό, μετά από προσφορά ο πελάτης ξαναγοράζει σε ~1,8× τον κανονικό κύκλο (κάνει απόθεμα)"})
     warnings = []
     if cold:
         warnings.append("νέος πελάτης με λίγο ιστορικό")
@@ -201,12 +201,14 @@ def build(d: Data | None = None) -> dict:
 def evaluation_json(d: Data, forecasts: list[dict] | None = None) -> dict:
     from .backtest import run
     from .models import REGISTRY
-    res = run(REGISTRY, d)
+    res = run(REGISTRY, d, truth="calibrated")
+    proxy = run(REGISTRY, d, truth="proxy").groupby("model", sort=False)["mae"].mean().round(3)
     n_date = sum(1 for f in forecasts or [] if f["PREDICTED_DEPLETION_DATE"])
     coverage = {"pairs": len(forecasts or []), "targets": int(len(d.targets)), "with_date": n_date,
                 "blank": len(forecasts or []) - n_date}
     mean = res.groupby("model", sort=False)[["mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"]].mean().round(3)
-    return {"source": "local_backtest (proxy truth = επόμενη αγορά· βλ. docs/RESULTS.md)",
+    return {"source": "local_backtest (truth = επόμενη αγορά + 2 μέρες + 0,1 × κύκλος, βαθμονομημένο στα σημεία αναφοράς του README· βλ. docs/RESULTS.md)",
+            "truth": "calibrated", "mae_proxy": {m: float(v) for m, v in proxy.items()},
             "cutoffs": [str(c.date()) for c in CUTOFFS], "default_model": DEFAULT_MODEL, "coverage": coverage,
             "readme_reference": {"cutoff+30": 18.3, "baseline_180": 16.1},
             "rows": [{"model": m, **{k: (None if pd.isna(v) else float(v)) for k, v in r.items()}} for m, r in mean.iterrows()],

@@ -40,8 +40,11 @@ export default function EvaluationPage() {
         <Card className="lg:col-span-2" title="Πώς διαβάζεται">
           <ul className="space-y-3 text-sm text-ink-2">
             <li><strong className="text-ink">Τι μετράμε.</strong> Για κάθε ζεύγος πελάτη × είδους, πόσες μέρες απέχει η πρόβλεψη από την πραγματική εξάντληση — όπως στη βαθμολόγηση του διαγωνισμού.</li>
-            <li><strong className="text-ink">«Αληθινή» εξάντληση στο backtest.</strong> Δεν βλέπουμε το απόθεμα του πελάτη, οπότε χρησιμοποιούμε την επόμενη αγορά του. Στα cutoffs 31/10 και 29/11 του 2025 το baseline βγάζει 14–15 μέρες, κοντά στις {fmt1(data.readme_reference.baseline_180)} που αναφέρει η Revival για το πραγματικό cutoff.</li>
-            <li><strong className="text-ink">Τι κάνει τη διαφορά.</strong> Ο ρυθμός κατανάλωσης από την ίδια περίοδο πέρσι, ο κύκλος αγορών κάθε πελάτη, οι νέοι πελάτες από παρόμοιους, και το απόθεμα που μένει μετά από προσφορά.</li>
+            <li><strong className="text-ink">«Αληθινή» εξάντληση στο backtest.</strong> Δεν βλέπουμε το απόθεμα του πελάτη. Ο πελάτης ξαναπαραγγέλνει λίγο πριν μηδενίσει, οπότε
+              «εξάντληση» = επόμενη αγορά + 2 μέρες + 10% του κύκλου του. Το βαθμονομήσαμε ώστε τα δύο σημεία αναφοράς της Revival (cutoff+30 ≈ {fmt1(data.readme_reference["cutoff+30"])},
+              baseline ≈ {fmt1(data.readme_reference.baseline_180)}) να βγαίνουν κοντά (στα cutoffs Οκτ–Νοε 2025).{data.mae_proxy?.[data.default_model] != null && <> Με σκέτη την επόμενη αγορά το μοντέλο βγάζει {fmt1(data.mae_proxy[data.default_model])}.</>}</li>
+            <li><strong className="text-ink">Τι κάνει τη διαφορά.</strong> Ο κύκλος αγορών κάθε πελάτη, ο ρυθμός κατανάλωσης από την ίδια περίοδο πέρσι (πιάνει όσους κλείνουν τον χειμώνα),
+              οι νέοι πελάτες από παρόμοιους, και η προσφορά: μετά από αγορά σε προσφορά η επόμενη έρχεται σε ~1,8× τον κανονικό κύκλο.</li>
           </ul>
         </Card>
       </div>

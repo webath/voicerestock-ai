@@ -27,6 +27,8 @@ export const MODEL_LABELS: Record<string, string> = {
   cadence: "Κύκλος αγορών",
   "hybrid_0.6": "Hybrid v1",
   "hybrid_0.7": "Hybrid v2",
+  hybrid_v2: "Hybrid v2",
+  hybrid_v3: "Hybrid v3",
 };
 
 export const FACTOR_LABELS: Record<string, string> = {
