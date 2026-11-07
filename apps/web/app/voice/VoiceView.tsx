@@ -1,25 +1,76 @@
 "use client";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { CALL_STEPS, CallStatusBadge, isLive, stepIndex } from "@/components/CallStatus";
 import { Card, EmptyState, ErrorBox, Loading, PageHeader, Select } from "@/components/ui";
-import { apiPost, usePolling, useApi, VOICE_TOKEN, VOICE_URL, type Call, type Salesman, type Suggestion } from "@/lib/api";
+import { ApiError, apiPost, useApi, VOICE_TOKEN, VOICE_URL, type Call, type Salesman, type Suggestion } from "@/lib/api";
 import { fmtNum } from "@/lib/format";
 
 const time = new Intl.DateTimeFormat("el-GR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const isSim = (c: Call) => c.call_sid.startsWith("SIM-");
+const PRIORITY_LABEL: Record<string, string> = { critical: "κρίσιμος", high: "επείγων", medium: "μέτριος", low: "χαμηλός" };
+
+/** Φωνή του browser (el-GR) για την προσομοίωση: η VORA με την πρώτη ελληνική φωνή, ο πωλητής με δεύτερη ή πιο βαθιά. */
+function speak(text: string, agent: boolean) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  const greek = window.speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith("el"));
+  const u = new SpeechSynthesisUtterance(text.replace(/«|»/g, ""));
+  u.lang = "el-GR";
+  u.rate = 1.08;
+  const v = agent ? greek[0] : greek[1] ?? greek[0];
+  if (v) u.voice = v;
+  if (!agent && greek.length < 2) u.pitch = 0.7;
+  window.speechSynthesis.speak(u);
+}
 
 export function VoiceView() {
   const calls = useApi<Call[]>("/api/calls");
   const salesmen = useApi<Salesman[]>("/api/salesmen");
   const sugs = useApi<Suggestion[]>("/api/suggestions");
-  usePolling(calls.reload, 3000);
   const params = useSearchParams();
   const toast = useToast();
   const [who, setWho] = useState(params.get("salesman") ?? "");
   const [dialing, setDialing] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [simMsg, setSimMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sound, setSound] = useState(true);
+  const spoken = useRef<Set<string> | null>(null);
+
+  // Όσο «μιλάει» μια κλήση (ή μόλις μίλησε μια προσομοίωση), ανανέωση κάθε 0,7″ αντί για 3″.
+  const latest = useRef<{ data?: Call[] | null; sim: boolean }>({ sim: false });
+  useEffect(() => { latest.current = { data: calls.data, sim: simulating }; });
+  const { reload } = calls;
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      reload();
+      const now = Date.now(), { data, sim } = latest.current;
+      const fast = sim || (data ?? []).some((c) => isLive(c.status)
+        || (isSim(c) && now - Date.parse(c.transcript.at(-1)?.at ?? c.started_at) < 15_000));
+      t = setTimeout(tick, fast ? 700 : 3000);
+    };
+    t = setTimeout(tick, 3000);
+    return () => clearTimeout(t);
+  }, [reload]);
+
+  // Νέες ατάκες προσομοίωσης → φωνή. Ό,τι υπήρχε ήδη όταν άνοιξε η σελίδα δεν ξαναλέγεται.
+  useEffect(() => {
+    if (!calls.data) return;
+    const first = spoken.current === null;
+    const seen = (spoken.current ??= new Set());
+    for (const c of [...calls.data].reverse()) {
+      c.transcript.forEach((t, i) => {
+        const k = `${c.call_sid}#${i}`;
+        if (seen.has(k)) return;
+        seen.add(k);
+        if (!first && sound && isSim(c)) speak(t.text, t.role === "agent" || t.role === "assistant");
+      });
+    }
+  }, [calls.data, sound]);
+  useEffect(() => () => { if (typeof window !== "undefined") window.speechSynthesis?.cancel(); }, []);
 
   if (calls.error) return <ErrorBox message={calls.error} />;
   if (!calls.data) return <Loading />;
@@ -47,6 +98,22 @@ export function VoiceView() {
     } finally { setDialing(false); }
   }
 
+  async function simulate() {
+    setSimulating(true); setSimMsg(null);
+    window.speechSynthesis?.cancel();
+    try {
+      const r = await apiPost<{ customer: string; priority: string }>("/api/calls/simulate", { salesman: Number(selected) });
+      setSimMsg({ ok: true, text: `Η VORA καλεί για τον πελάτη ${r.customer} (${PRIORITY_LABEL[r.priority] ?? r.priority}).` });
+      calls.reload();
+    } catch (e) {
+      const text = e instanceof ApiError && e.code === "no_suggestion"
+        ? "Ο πωλητής δεν έχει άλλη ανοιχτή πρόταση — διάλεξε άλλον πωλητή."
+        : e instanceof ApiError && e.code === "sim_running" ? "Τρέχει ήδη μια προσομοίωση." : (e as Error).message;
+      setSimMsg({ ok: false, text });
+      toast({ kind: "error", title: "Η προσομοίωση δεν ξεκίνησε", text });
+    } finally { setTimeout(() => setSimulating(false), 4000); }
+  }
+
   return (
     <>
       <PageHeader title="Κλήσεις"
@@ -70,6 +137,26 @@ export function VoiceView() {
               <li>• Πριν από κάθε παραγγελία διαβάζει την ακριβή περίληψη και περιμένει «ναι, επιβεβαιώνω».</li>
               <li>• Μία επιβεβαίωση = ακριβώς ένα draft, ακόμη κι αν κοπεί η γραμμή.</li>
             </ul>
+
+            <div className="mt-2 border-t border-[var(--grid)] pt-4">
+              <div className="mb-1 text-sm font-semibold text-ink">Προσομοίωση κλήσης</div>
+              <p className="mb-3 text-xs text-ink-2">
+                Χωρίς τηλέφωνο: η VORA «καλεί» τον πωλητή για τον πιο επείγοντα at-risk πελάτη του. Οι ατάκες του πωλητή
+                είναι έτοιμες· η αλλαγή ποσότητας και το draft περνούν κανονικά από το App API στο ERP.
+              </p>
+              <button className="btn btn-primary w-full" onClick={simulate} disabled={simulating || !selected}>
+                {simulating ? <><span className="ai-dots" aria-hidden><i /><i /><i /></span> Καλεί…</> : "▶ Προσομοίωση κλήσης"}
+              </button>
+              <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+                <input type="checkbox" checked={sound} onChange={(e) => { setSound(e.target.checked); if (!e.target.checked) window.speechSynthesis?.cancel(); }} />
+                Φωνή (ελληνικά, από τον browser)
+              </label>
+              {simMsg && (
+                <p role="status" className="fade-in mt-2 text-sm text-ink-2">
+                  <span aria-hidden style={{ color: simMsg.ok ? "var(--good)" : "var(--critical)" }}>{simMsg.ok ? "✓" : "!"}</span> {simMsg.text}
+                </p>
+              )}
+            </div>
           </div>
         </Card>
 
@@ -88,8 +175,11 @@ export function VoiceView() {
 function CallCard({ c, name }: { c: Call; name?: string }) {
   const idx = stepIndex(c.status);
   const failed = c.status === "failed" || c.status === "cancelled";
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { box.current?.scrollTo({ top: box.current.scrollHeight, behavior: "smooth" }); }, [c.transcript.length]);
   return (
-    <Card lift title={<span className="flex items-center gap-2">{name ?? "Πωλητής"} <CallStatusBadge status={c.status} /></span>}
+    <Card lift title={<span className="flex items-center gap-2">{name ?? "Πωλητής"} <CallStatusBadge status={c.status} />
+      {isSim(c) && <span className="rounded-full border border-line px-2 py-0.5 text-xs font-normal text-ink-muted">προσομοίωση</span>}</span>}
       subtitle={<span className="tnum">{time.format(new Date(c.started_at))}{c.ended_at ? ` – ${time.format(new Date(c.ended_at))}` : ""} · {c.call_sid}</span>}>
       <ol className="mb-4 flex flex-wrap items-center gap-1.5" aria-label="Πρόοδος κλήσης">
         {CALL_STEPS.map((s, i) => {
@@ -109,14 +199,14 @@ function CallCard({ c, name }: { c: Call; name?: string }) {
       </ol>
 
       {c.transcript.length > 0 ? (
-        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+        <div ref={box} className="max-h-96 space-y-2 overflow-y-auto pr-1">
           {c.transcript.map((t, i) => {
             const agent = t.role === "agent" || t.role === "assistant";
             return (
               <div key={i} className={`fade-in flex ${agent ? "justify-start" : "justify-end"}`}>
                 <div className="max-w-[80%] rounded-2xl px-3 py-2 text-sm"
                   style={{ background: agent ? "var(--surface-2)" : "var(--series-1-wash)", color: "var(--ink)" }}>
-                  <div className="mb-0.5 text-[11px] text-ink-muted">{agent ? "AI βοηθός" : name ?? "Πωλητής"} · {time.format(new Date(t.at))}</div>
+                  <div className="mb-0.5 text-[11px] text-ink-muted">{agent ? "VORA · AI βοηθός" : name ?? "Πωλητής"} · {time.format(new Date(t.at))}</div>
                   {t.text}
                 </div>
               </div>

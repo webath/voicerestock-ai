@@ -153,6 +153,7 @@ proposed|modified ──▶ cancelled
 | GET | `/api/evaluation` | – | `{"source", "cutoffs", "default_model", "coverage": {"pairs", "targets", "with_date", "blank"}, "readme_reference": {...}, "rows": [{"model", "mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"}], "per_cutoff": [...]}` |
 | GET | `/api/agent` | – | *(μόνο dashboard)* `{"running", "current", "last", "schedule", "runs": [...]}` — εκτέλεση του VORA agent· `steps` ανά βήμα `{status, detail, metrics, ms}` |
 | POST | `/api/agent/run` | – | *(μόνο dashboard)* 202 + η εκτέλεση που ξεκίνησε · 409 `agent_running` αν τρέχει ήδη |
+| POST | `/api/calls/simulate` | `{"salesman"?, "suggestion_id"?}` | *(μόνο dashboard, demo)* 202 `{call_sid: "SIM-…", suggestion_id, customer, priority}` — «παίζει» κλήση για τον πιο επείγοντα ανοιχτό πελάτη· γράφει events όπως το `/api/calls/events`, αλλαγή ποσότητας/confirm/draft από τα κανονικά endpoints (actor `voice:sim`) · 409 `sim_running` / `no_suggestion` |
 | POST | `/api/calls/events` | `{"call_sid","type","status?","text?","role?","suggestion_id?","erp_draft_id?"}` | `{"ok": true}` — το Voice στέλνει εδώ ό,τι συμβαίνει |
 | GET | `/api/calls` | – | `Call[]` (πιο πρόσφατη πρώτη) |
 | GET | `/api/audit?limit=200` | – | `[{at, actor, action, suggestion_id, outcome}]` |
