@@ -101,7 +101,7 @@ export function AssistantPanel() {
         <header className="flex items-center gap-3 border-b border-[var(--grid)] px-4 py-3">
           <span className="ai-orb" aria-hidden><Sparkle /></span>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-ink">AI βοηθός πωλήσεων</div>
+            <div className="text-sm font-semibold text-ink">VORA · AI βοηθός πωλήσεων</div>
             <div className="text-xs text-ink-muted">Ψάχνει μόνο στα δεδομένα του συστήματος · δεν αλλάζει παραγγελίες</div>
           </div>
           <button type="button" className="btn btn-ghost btn-sm !h-8 !w-8 !p-0" onClick={() => setOpen(false)} aria-label="Κλείσιμο">✕</button>

@@ -11,7 +11,7 @@ import "./globals.css";
 const ui = Commissioner({ subsets: ["latin", "greek"], variable: "--font-ui", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "VoiceRestock AI",
+  title: "VORA — Voice Ordering & Restock Assistant",
   description: "Προβλέψεις εξάντλησης αποθέματος και προτεινόμενες παραγγελίες για τον Account Manager",
 };
 

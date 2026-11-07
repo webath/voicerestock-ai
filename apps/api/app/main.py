@@ -1,4 +1,4 @@
-"""VoiceRestock App API — υλοποιεί το docs/CONTRACTS.md.
+"""VORA App API — υλοποιεί το docs/CONTRACTS.md.
 
     uv run uvicorn app.main:app --port 8000
 Προϋπόθεση: `cd services/forecast && uv run python -m forecast.ingest && uv run python -m forecast.suggest`
@@ -74,7 +74,7 @@ class CallEvent(BaseModel):
 
 
 def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> FastAPI:
-    app = FastAPI(title="VoiceRestock App API")
+    app = FastAPI(title="VORA App API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.state.store = store or Store()
     app.state.erp = erp or MockERPAdapter()

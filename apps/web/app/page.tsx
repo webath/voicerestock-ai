@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { DayColumns } from "@/components/charts/DayColumns";
 import { Briefing } from "@/components/AiText";
 import { CallStatusBadge } from "@/components/CallStatus";
-import { Card, ErrorBox, Loading, PageHeader, StatTile, UrgencyBadge } from "@/components/ui";
+import { Card, ErrorBox, Loading, PageHeader, PriorityBadge, StatTile } from "@/components/ui";
+import { byPriority, priorityOf, priorityReason } from "@/lib/priority";
 import {
   apiPost, useApi, type Call, type Evaluation, type RiskRow, type Salesman, type Suggestion,
 } from "@/lib/api";
@@ -38,7 +39,11 @@ export default function Overview() {
       .sort((a, b) => a.SUGGESTED_DELIVERY_DATE.localeCompare(b.SUGGESTED_DELIVERY_DATE)
         || a.LINES[0].PREDICTED_DEPLETION_DATE.localeCompare(b.LINES[0].PREDICTED_DEPLETION_DATE));
     const open = s.filter((x) => ["proposed", "modified", "confirmed", "failed"].includes(x.status));
+    const ranked = [...open].sort(byPriority);
     return {
+      startWith: ranked.filter((x) => priorityOf(x).priority === "critical").slice(0, 8),
+      critical: open.filter((x) => priorityOf(x).priority === "critical").length,
+      lost: open.filter((x) => priorityOf(x).priority === "lost"),
       openValue: open.reduce((a, x) => a + (x.VALUE ?? 0), 0),
       draftValue: s.filter((x) => x.status === "draft_created").reduce((a, x) => a + (x.VALUE ?? 0), 0),
       atRiskCustomers: new Set(r.filter((x) => (x.days_left ?? 99) <= 7).map((x) => x.TRDR)).size,
@@ -80,13 +85,13 @@ export default function Overview() {
 
       <div className="reveal grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile hero label="Πελάτες σε κίνδυνο" value={fmtNum(stats.atRiskCustomers)}
-          note={`${fmtNum(stats.items7)} είδη τελειώνουν μέσα σε 7 μέρες`} />
+          note={<>{fmtNum(stats.items7)} είδη τελειώνουν μέσα σε 7 μέρες · <strong className="text-ink">{fmtNum(stats.critical)} κρίσιμοι</strong></>} />
         <StatTile label="Αξία προτάσεων προς έγκριση" value={fmtEur(stats.openValue)}
           note="καθαρή αξία με τιμές καταλόγου — πωλήσεις που κινδυνεύουν να χαθούν" />
         <StatTile label="Παραγγελίες προς έγκριση" value={fmtNum(stats.pending)}
           note={<>{fmtNum(stats.drafts)} στο ERP ({fmtEur(stats.draftValue)}) · <Link className="underline" href="/orders">άνοιγμα</Link></>} />
         <StatTile label="Ακρίβεια μοντέλου" value={cur ? <>{fmt1(cur.mae)} <span className="text-base font-normal text-ink-2">μέρες MAE</span></> : "–"}
-          note={<Link className="underline" href="/evaluation">baseline 11,3 · λεπτομέρειες</Link>} />
+          note={<Link className="underline" href="/evaluation">baseline {fmt1(ev.data?.rows.find((r) => r.model === "baseline_180")?.mae)} · λεπτομέρειες</Link>} />
       </div>
 
       <div className="reveal mt-6 grid gap-6 lg:grid-cols-5">
@@ -153,17 +158,41 @@ export default function Overview() {
       </div>
 
       <div className="reveal mt-6">
-        <Card title="Πιο επείγοντα είδη" subtitle="Τελειώνουν μέσα στις επόμενες 3 μέρες" action={<Link href="/risk" className="text-sm text-ink-2 hover:text-ink">At Risk →</Link>}>
-          <div className="flex flex-wrap gap-2">
-            {risk.data.filter((r) => (r.days_left ?? 99) <= 3).slice(0, 18).map((r) => (
-              <Link key={`${r.TRDR}-${r.MTRL}`} href={`/customers/${r.TRDR}`}
-                className="lift card !rounded-xl px-3 py-2 text-xs" title={`${r.CUSTOMER_NAME} · ${r.ITEM_NAME}`}>
-                <span className="block max-w-[220px] truncate font-medium text-ink">{r.ITEM_NAME}</span>
-                <span className="flex items-center gap-2 text-ink-muted"><span className="truncate max-w-[150px]">{r.CUSTOMER_NAME}</span> · {fmtDay(r.PREDICTED_DEPLETION_DATE)}</span>
-              </Link>
-            ))}
-          </div>
-          <div className="mt-3"><UrgencyBadge urgency="high" /> <span className="ml-1 text-xs text-ink-muted">= εξάντληση μέσα σε 7 μέρες</span></div>
+        <Card title="Με ποιους να ξεκινήσεις" subtitle="Κρίσιμοι: έχουν περάσει 1,5× τον κύκλο αγορών τους χωρίς παραγγελία — πιθανότατα έχουν ήδη ξεμείνει. Κατά αξία."
+          action={<Link href="/orders" className="text-sm text-ink-2 hover:text-ink">Παραγγελίες →</Link>}>
+          {stats.startWith.length === 0 ? <p className="text-sm text-ink-2">Κανένας κρίσιμος πελάτης αυτή τη στιγμή.</p> : (
+            <ol className="-my-1 divide-y divide-[var(--grid)]">
+              {stats.startWith.map((x, i) => {
+                const p = priorityOf(x);
+                return (
+                  <li key={x.id} className="py-2.5">
+                    <Link href={`/orders?open=${x.id}`} className="group flex items-center gap-3">
+                      <span className="w-5 shrink-0 text-right text-xs font-semibold text-ink-muted tnum">{i + 1}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-ink group-hover:underline">{x.CUSTOMER_NAME}</span>
+                        <span className="block truncate text-xs text-ink-muted">{p.item}: {p.daysSince} μέρες χωρίς αγορά, συνήθως κάθε ~{Math.round(p.interval ?? 0)} · {x.LINES.length} είδη</span>
+                      </span>
+                      <span className="shrink-0 text-right">
+                        <span className="block text-sm font-semibold text-ink tnum">{fmtEur(x.VALUE)}</span>
+                        <span className="block text-xs text-ink-muted">{x.SALESMAN_NAME.split(" ")[0]}</span>
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          {stats.lost.length > 0 && (
+            <div className="mt-4 rounded-xl bg-surface-2 p-3 text-sm">
+              <div className="flex items-center gap-2"><PriorityBadge info={priorityOf(stats.lost[0])} /><span className="text-ink-2">δεν αγοράζουν τίποτα εδώ και 3+ κύκλους — θέλουν τηλέφωνο, όχι παραγγελία:</span></div>
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {stats.lost.map((x) => (
+                  <li key={x.id}><Link href={`/customers/${x.TRDR}`} title={priorityReason(priorityOf(x)) ?? undefined}
+                    className="card lift inline-block !rounded-xl px-3 py-1.5 text-xs font-medium text-ink">{x.CUSTOMER_NAME}</Link></li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
       </div>
     </>

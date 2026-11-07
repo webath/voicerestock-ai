@@ -3,7 +3,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { AiBadge, CustomerMessage } from "@/components/AiText";
 import { PurchaseTimeline } from "@/components/charts/PurchaseTimeline";
-import { Card, Chip, ErrorBox, Loading, PageHeader, SkeletonLines, UrgencyBadge } from "@/components/ui";
+import { Card, Chip, ErrorBox, Loading, PageHeader, PriorityBadge, SkeletonLines, UrgencyBadge } from "@/components/ui";
+import { priorityOf, priorityReason } from "@/lib/priority";
 import {
   useApi, type Customer, type Explanation, type Forecast, type History, type Suggestion, type SuggestionLine,
 } from "@/lib/api";
@@ -48,9 +49,12 @@ export function CustomerView({ trdr }: { trdr: number }) {
       >
         <div className="flex flex-wrap gap-2">
           {c.cold_start && <Chip title={`Πρώτη καταχώριση ${c.INSDATE}`}>Νέος πελάτης · από {fmtDay(c.INSDATE)}</Chip>}
-          {suggestion ? <UrgencyBadge urgency={suggestion.urgency} /> : <UrgencyBadge urgency="none" />}
+          {suggestion ? <PriorityBadge info={priorityOf(suggestion)} reason={priorityReason(priorityOf(suggestion))} /> : <UrgencyBadge urgency="none" />}
         </div>
       </PageHeader>
+      {suggestion && priorityReason(priorityOf(suggestion)) && (
+        <p className="fade-in -mt-2 mb-5 text-sm text-ink-2"><span aria-hidden style={{ color: priorityOf(suggestion).priority === "lost" ? "var(--serious)" : "var(--critical)" }}>{priorityOf(suggestion).priority === "lost" ? "?" : "▲"}</span> {priorityReason(priorityOf(suggestion))}</p>
+      )}
 
       <div className="reveal grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2" title={fc ? fc.ITEM_NAME : "Παραλαβές"}
