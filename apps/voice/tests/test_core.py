@@ -196,6 +196,29 @@ class Flow(unittest.TestCase):
         self.assertEqual(body["LINES"][0]["QTY1"], self.sug["LINES"][0]["QTY_RECOMMENDED"] + 1)
         self.assertIn("draft_created", [e.get("status") for e in self.events])
 
+    def test_speech_guard_blocks_yes_before_full_readback(self):
+        """Κλήση 7/11: «ναι, κάν' το» ΠΑΝΩ στην περίληψη έφτιαξε draft. Με τον φύλακα: ποτέ."""
+        async def go():
+            s = core.CallSession(self._req, self.sug["SALESMAN"], "CALLGUARD", on_event=self._event, speech_guard=True)
+            s.USER_GRACE_S = 0.2
+            sid = self.sug["id"]
+            prep = await s.prepare_order(sid)
+            s.note_user("Ναι, ναι, κάν' το")                            # πριν ακουστεί η περίληψη
+            s.note_agent("Επιβεβαιώνετε draft παραγγελίας για τον πελάτη … Ice tea τέσσερα κιβώτια, Ένα λεπτάκι.")  # κομμένη
+            r1 = await s.place_draft_order(sid)
+            s.note_agent(prep["say"])                                    # ολόκληρη περίληψη
+            r2 = await s.place_draft_order(sid)                          # ο πωλητής ΔΕΝ μίλησε μετά
+            s.note_user("Ναι, επιβεβαιώνω")
+            r3 = await s.place_draft_order(sid)
+            return r1, r2, r3
+        r1, r2, r3 = self.run_(go())
+        self.assertEqual(r1["status"], "error")
+        self.assertIn("δεν ακούστηκε", r1["message"].lower())
+        self.assertIn("Επιβεβαιώνετε", r1["say"])                         # η βοηθός ξαναδιαβάζει την περίληψη
+        self.assertEqual(r2["status"], "error")
+        self.assertEqual(r3["status"], "draft_created", r3)
+        self.assertEqual(len(self.drafts()), 1)
+
     def test_change_after_readback_blocks_write(self):
         async def go():
             s = self.session()

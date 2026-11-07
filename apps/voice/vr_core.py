@@ -13,7 +13,9 @@ Python 3.9-συμβατό (τα tests τρέχουν και στο Mac με το
 """
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from datetime import date
 from typing import Any, Awaitable, Callable, Optional
 
@@ -268,6 +270,7 @@ PRIORITY_NOTE = {
 # Κλήση: τα εργαλεία με τους κανόνες ασφαλείας
 # ---------------------------------------------------------------------------
 Request = Callable[..., Awaitable["tuple[int, Any]"]]   # (method, path, body=None) -> (status, json)
+_now = time.monotonic
 
 
 class CallSession:
@@ -275,8 +278,10 @@ class CallSession:
 
     LARGE_FACTOR = 2   # ποσότητα > 2× της πρότασης → ξανά-επιβεβαίωση («15» vs «50»)
 
+    USER_GRACE_S = 2.5              # το transcript του «ναι» μπορεί να φτάσει λίγο μετά το αίτημα του LLM
+
     def __init__(self, request: Request, salesman: int, call_id: str,
-                 on_event: Optional[Callable[..., Awaitable[None]]] = None):
+                 on_event: Optional[Callable[..., Awaitable[None]]] = None, speech_guard: bool = False):
         self.req = request
         self.salesman = salesman
         self.call_id = call_id
@@ -286,6 +291,40 @@ class CallSession:
         self.large_ok: set = set()           # (id, mtrl, qty) που επιβεβαιώθηκαν ως «μεγάλες»
         self.drafts: dict = {}               # id -> erp_draft_id
         self.status = "queued"
+        # Φύλακας ομιλίας (πραγματικές κλήσεις): draft ΜΟΝΟ αν η περίληψη ειπώθηκε ολόκληρη ΚΑΙ ο πωλητής
+        # μίλησε ΜΕΤΑ. Στην κλήση της 7/11 ένα «ναι» πάνω στην περίληψη έφτιαξε draft πριν ακουστεί.
+        self.speech_guard = speech_guard
+        self.prepared_at: dict = {}          # id -> χρόνος του prepare_order
+        self.readback_at: Optional[float] = None   # πότε τελείωσε η τελευταία ολοκληρωμένη περίληψη
+        self.user_at: Optional[float] = None       # πότε μίλησε τελευταία ο πωλητής
+
+    # ---- τι ειπώθηκε (από τους observers της φωνής) ----
+    def note_agent(self, text: str, at: Optional[float] = None):
+        """Μια ΟΛΟΚΛΗΡΩΜΕΝΗ φράση της βοηθού (BotStoppedSpeaking). Περίληψη = στην ΙΔΙΑ φράση και η ερώτηση
+        «Επιβεβαιώνετε…» και η παράδοση (το τέλος της). Κομμένη περίληψη δεν έχει την παράδοση → δεν μετράει."""
+        t = (text or "").lower()
+        if "επιβεβαιών" in t and "παράδοση" in t:
+            self.readback_at = at if at is not None else _now()
+
+    def note_user(self, text: str, at: Optional[float] = None):
+        if (text or "").strip():
+            self.user_at = at if at is not None else _now()
+
+    async def _heard_and_answered(self, sid: str) -> Optional[str]:
+        """None αν επιτρέπεται το write, αλλιώς ο λόγος (οδηγία για τη βοηθό)."""
+        if not self.speech_guard:
+            return None
+        prep = self.prepared_at.get(sid, 0)
+        if self.readback_at is None or self.readback_at < prep:
+            return ("Η περίληψη ΔΕΝ ακούστηκε ολόκληρη. Διάβασε ξανά ΟΛΟΚΛΗΡΗ την περίληψη του prepare_order, "
+                    "μέχρι και την παράδοση, και περίμενε απάντηση. Δεν δημιουργήθηκε τίποτα.")
+        deadline = _now() + self.USER_GRACE_S
+        while self.user_at is None or self.user_at <= self.readback_at:
+            if _now() >= deadline:
+                return ("Ο πωλητής δεν απάντησε ΜΕΤΑ την περίληψη. Ρώτα τον ξανά αν επιβεβαιώνει. "
+                        "Δεν δημιουργήθηκε τίποτα.")
+            await asyncio.sleep(0.1)
+        return None
 
     # ---- βοηθητικά ----
     async def event(self, **kw):
@@ -392,6 +431,7 @@ class CallSession:
         if s["status"] not in OPEN_STATUSES:
             return self._err(f"Η πρόταση δεν μπορεί να γίνει παραγγελία (κατάσταση {s['status']}).")
         self.pending[suggestion_id] = s["version"]
+        self.prepared_at[suggestion_id] = _now()   # μόνο περίληψη που θα ειπωθεί ΜΕΤΑ από εδώ μετράει
         await self.set_status("confirming", suggestion_id=suggestion_id)
         return {"status": "awaiting_confirmation", "say": read_back(s),
                 "message": "Διάβασε το «say» ΟΛΟΚΛΗΡΟ και αυτούσιο, τελείωσε με την ερώτηση και ΣΤΑΜΑΤΑ. "
@@ -412,6 +452,11 @@ class CallSession:
         if s["version"] != version:
             self.pending.pop(suggestion_id, None)
             return self._err("Η πρόταση άλλαξε μετά την περίληψη. Κάλεσε ξανά prepare_order και διάβασέ τη.")
+        not_yet = await self._heard_and_answered(suggestion_id)
+        if not_yet:
+            await self.event(type="status", status="confirming", suggestion_id=suggestion_id,
+                             text="Μπλοκαρίστηκε draft: η περίληψη δεν ακούστηκε ολόκληρη πριν το «ναι»")
+            return self._err(not_yet, say=read_back(s))
         code, conf = await self.req("POST", f"/api/suggestions/{suggestion_id}/confirm", {"version": version})
         if code != 200 or not conf.get("confirmation_token"):
             return self._err("Η επιβεβαίωση απέτυχε στο σύστημα. Δεν δημιουργήθηκε draft.")

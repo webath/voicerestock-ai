@@ -271,6 +271,8 @@ class CallWatch(FrameProcessor):
             said = " ".join(("" if self._spaces else " ").join(self._said).split())
             self._said.clear()
             logger.info(f"{self._tag} Agent: {said}" if LOG_TRANSCRIPTS else f"{self._tag} Agent μίλησε ({len(said)} χαρ.)")
+            if self._session:
+                self._session.note_agent(said)   # φύλακας: ολοκληρωμένη περίληψη;
             self._post(type="transcript", role="agent", text=said)
         await self.push_frame(frame, direction)
 
@@ -283,6 +285,8 @@ class UserWatch(CallWatch):
         await FrameProcessor.process_frame(self, frame, direction)
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             logger.info(f"{self._tag} Πωλητής: {frame.text}" if LOG_TRANSCRIPTS else f"{self._tag} Πωλητής μίλησε")
+            if self._session:
+                self._session.note_user(frame.text)   # φύλακας: μίλησε ο πωλητής (μετά την περίληψη;)
             self._post(type="transcript", role="user", text=frame.text.strip())
             if self._session and self._session.status == "greeted":
                 self._session.status = "discussing"
@@ -524,7 +528,7 @@ async def http_calls(request: web.Request):
     if len(ACTIVE) >= MAX_CONCURRENT_CALLS or any(r.startswith(f"vr-{salesman}-") for r in ACTIVE):
         return _json(409, {"error": "busy", "message": "Υπάρχει ήδη κλήση σε εξέλιξη"})
     room = f"vr-{salesman}-{int(time.time())}"
-    session = CallSession(api_request(f"voice:{room}"), salesman, room, on_event=post_call_event)
+    session = CallSession(api_request(f"voice:{room}"), salesman, room, on_event=post_call_event, speech_guard=True)
     try:
         open_ = await session.load()
     except Exception as e:
@@ -567,7 +571,8 @@ async def handle_inbound(room_name: str):
                      if digits10(p) and digits10(p) == digits10(phone) and digits10(p) in ALLOWED), None)
     session, name = None, ""
     if salesman is not None:
-        session = CallSession(api_request(f"voice:{room_name}"), salesman, room_name, on_event=post_call_event)
+        session = CallSession(api_request(f"voice:{room_name}"), salesman, room_name, on_event=post_call_event,
+                              speech_guard=True)
         try:
             await session.load()
             name = await salesman_name(salesman)
