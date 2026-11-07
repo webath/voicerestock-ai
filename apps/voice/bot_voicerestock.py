@@ -48,7 +48,7 @@ from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.workers.llm.backend_llm_worker import BackendLLMWorker
 from pipecat.workers.runner import WorkerRunner
 
-from vr_core import CallSession, OPEN_STATUSES, PRIORITY_NOTE, num_words, priority_of, priority_sort_key, suggestion_brief
+from vr_core import CallSession, OPEN_STATUSES, PRIORITY_NOTE, num_words, opening_line, priority_of, priority_sort_key
 
 load_dotenv(override=True)
 # Δεύτερο αρχείο ρυθμίσεων μόνο για το VoiceRestock (δεν αγγίζουμε το .env του receptionist).
@@ -150,15 +150,15 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
     # Με πραγματικά δεδομένα ένας πωλητής έχει δεκάδες προτάσεις: στο τηλέφωνο μόνο οι πρώτες.
     # Οι υπόλοιπες μένουν στο dashboard (και ο server επιτρέπει κάθε πρόταση του πωλητή, αν τη ζητήσει).
     spoken, rest = open_[:MAX_SPOKEN], len(open_) - MAX_SPOKEN
-    listing = "\n".join(f"{i}. {PRIORITY_NOTE.get(priority_of(s)[0], '')}{suggestion_brief(s)}"
+    listing = "\n".join(f"{i}. {PRIORITY_NOTE.get(priority_of(s)[0], '')}{opening_line(s)}"
                         for i, s in enumerate(spoken, 1)) or "(καμία ανοιχτή πρόταση)"
     if rest > 0:
         listing += (f"\n(Υπάρχουν ακόμα {num_words(rest, feminine=True)} λιγότερο επείγουσες προτάσεις. ΔΕΝ τις διαβάζεις· "
                     "αν ρωτήσει, πες ότι φαίνονται στο dashboard.)")
     who = "Κάνεις ΕΞΕΡΧΟΜΕΝΗ κλήση" if outbound else "Απαντάς σε κλήση"
     start = ("Περίμενε να σου πουν ότι η κλήση απαντήθηκε. Τότε:" if outbound else "Μόλις σου πουν, ξεκίνα:")
-    greeting = ("«Καλησπέρα σας, είμαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Σας καλώ για πελάτες σας που κινδυνεύουν\n"
-                "   να ξεμείνουν από εμπόρευμα. Έχετε ένα λεπτό;»" if outbound else
+    greeting = ("«Καλησπέρα σας, είμαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Έχω πελάτες σας που κινδυνεύουν\n"
+                "   να ξεμείνουν. Έχετε ένα λεπτό;»" if outbound else
                 "«Καλησπέρα σας, είμαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Έχετε πελάτες που κινδυνεύουν να\n"
                 "   ξεμείνουν από εμπόρευμα. Θέλετε να τους δούμε;»")
     return f"""\
@@ -166,7 +166,17 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
 DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρεμπορίου τροφίμων και ποτών (τεχνητή νοημοσύνη, όχι
 άνθρωπος). {who} με έναν πωλητή της εταιρείας (όνομα: {name}) για πελάτες του που κινδυνεύουν
 να ξεμείνουν από εμπόρευμα. Δεν τον αποκαλείς με το όνομα, εκτός αν σου συστηθεί.
-Μιλάς ΠΑΝΤΑ Ελληνικά, στον πληθυντικό ευγενείας, φυσικά και σύντομα: 1-2 προτάσεις κάθε φορά.
+Μιλάς ΠΑΝΤΑ Ελληνικά, στον πληθυντικό ευγενείας, φυσικά.
+
+=== ΣΥΝΤΟΜΙΑ (ο πωλητής σε ακούει στο κινητό, συχνά οδηγώντας) ===
+- Κάθε ατάκα: το πολύ ΔΥΟ σύντομες προτάσεις, περίπου δέκα δευτερόλεπτα. Μετά σταματάς και περιμένεις.
+- Για κάθε πελάτη λες ΜΟΝΟ τη γραμμή του από τη λίστα. Ποτέ όλα τα είδη μαζί. Τα υπόλοιπα είδη μόνο αν
+  ρωτήσει («τι άλλο;», «ποια είδη;») → ζήτα από το backend τη λίστα ειδών.
+- Οι σημειώσεις σε αγκύλες [ΚΡΙΣΙΜΟ…] είναι για σένα: πες τες με τρεις-τέσσερις λέξεις, όχι αυτούσιες.
+
+=== ΓΛΩΣΣΑ ===
+Μόνο ελληνικές λέξεις (εκτός από ονόματα προϊόντων, π.χ. «Ice tea»). Ποτέ αγγλικά («hello», «okay»), ποτέ
+ήχους, σφυρίγματα ή ηχητικές ενδείξεις, ποτέ κείμενο σε αγκύλες.
 
 === ΠΡΟΤΑΣΕΙΣ ΤΟΥ ΣΥΣΤΗΜΑΤΟΣ ΠΡΟΒΛΕΨΗΣ (η ΜΟΝΗ σου πηγή, σειρά: πιο επείγον πρώτα) ===
 {listing}
@@ -179,9 +189,10 @@ DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρεμπορίου τροφίμων και
 1. {greeting}
    (Αν στην αρχή ακούσεις «ναι;», «έλα», «εμπρός», «παρακαλώ», «λέγετε»: σήκωσε το τηλέφωνο. Πες ΑΜΕΣΩΣ το
    βήμα 1 και τίποτα πριν από αυτό: όχι «ακούω», όχι «hello», καμία λέξη στα αγγλικά.)
-2. Αν πει ναι: ξεκίνα από τον πρώτο πελάτη της λίστας. Πες τι τελειώνει και πότε, την πρόταση και την
-   παράδοση. Αν έχει πολλά είδη, πες πρώτα τα δύο πιο επείγοντα και ότι υπάρχουν κι άλλα.
-   Μετά ρώτα: «Θέλετε να σας πω γιατί, ή να την περάσω;»
+2. Αν πει ναι: πες τη γραμμή του πρώτου πελάτη της λίστας και ρώτα: «Να την περάσω, ή θέλετε να σας πω γιατί;»
+   ΓΡΗΓΟΡΟΣ ΤΡΟΠΟΣ: αν πει ότι οδηγεί, ότι δεν έχει χρόνο ή ότι θέλει έναν μόνο πελάτη, τίποτα παραπάνω:
+   η γραμμή του πρώτου πελάτη και «Να την περάσω;». Μετά από κάθε draft: «Θέλετε τον επόμενο, ή κλείνουμε;»
+   - «Τι άλλο;» / «ποια είδη;» → ζήτα από το backend τη λίστα ειδών και πες τη σύντομα.
    - «Γιατί;» / «από πού βγαίνει;» → ζήτα από το backend την εξήγηση και πες τη σύντομα.
    - Αλλαγή ποσότητας («κάν' τα δεκαπέντε») → ζήτα από το backend να την αλλάξει και πες το αποτέλεσμα
      όπως σου το δίνει. Αν το backend σου δώσει ερώτηση επιβεβαίωσης του αριθμού, κάνε ΑΚΡΙΒΩΣ αυτή.
@@ -261,13 +272,22 @@ class CallWatch(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, BotStartedSpeakingFrame):
             self._state["spoke"] = True
+            m = self._state["m"]
+            m["speaking"], m["bot_start"] = True, time.monotonic()
+            if m["last_user"] is not None:                       # καθυστέρηση: τέλος πωλητή → αρχή βοηθού
+                m["lat"].append(m["bot_start"] - m["last_user"])
+                m["last_user"] = None
             if self._state["answered"] and self._session and self._session.status in ("connected", "dialing"):
                 self._session.status = "greeted"
                 self._post(type="status", status="greeted")
         elif isinstance(frame, TTSTextFrame):
             self._said.append(frame.text)
             self._spaces = getattr(frame, "includes_inter_frame_spaces", False)
-        elif isinstance(frame, BotStoppedSpeakingFrame) and self._said:
+        elif isinstance(frame, BotStoppedSpeakingFrame) and self._state["m"]["speaking"]:
+            m = self._state["m"]
+            m["speaking"] = False
+            m["turns"].append(time.monotonic() - m["bot_start"])  # διάρκεια ατάκας
+        if isinstance(frame, BotStoppedSpeakingFrame) and self._said:
             said = " ".join(("" if self._spaces else " ").join(self._said).split())
             self._said.clear()
             logger.info(f"{self._tag} Agent: {said}" if LOG_TRANSCRIPTS else f"{self._tag} Agent μίλησε ({len(said)} χαρ.)")
@@ -285,6 +305,10 @@ class UserWatch(CallWatch):
         await FrameProcessor.process_frame(self, frame, direction)
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             logger.info(f"{self._tag} Πωλητής: {frame.text}" if LOG_TRANSCRIPTS else f"{self._tag} Πωλητής μίλησε")
+            m = self._state["m"]
+            if m["speaking"]:
+                m["barge"] += 1                                     # μίλησε πάνω στη βοηθό
+            m["last_user"] = time.monotonic()
             if self._session:
                 self._session.note_user(frame.text)   # φύλακας: μίλησε ο πωλητής (μετά την περίληψη;)
             self._post(type="transcript", role="user", text=frame.text.strip())
@@ -292,6 +316,14 @@ class UserWatch(CallWatch):
                 self._session.status = "discussing"
                 self._post(type="status", status="discussing")
         await self.push_frame(frame, direction)
+
+
+def call_metrics(m: dict) -> str:
+    """Μία γραμμή για σύγκριση κλήσεων: πόσο μιλά η βοηθός, πόσο αργεί, πόσες φορές τη διέκοψαν."""
+    t, l = m["turns"], m["lat"]
+    avg = lambda xs: sum(xs) / len(xs) if xs else 0.0  # noqa: E731
+    return (f"ατάκες {len(t)} · διάρκεια μέση {avg(t):.1f}s / μέγιστη {max(t, default=0):.1f}s · "
+            f"καθυστέρηση μέση {avg(l):.1f}s / μέγιστη {max(l, default=0):.1f}s · διακοπές {m['barge']}")
 
 
 def _token(room_name: str, identity: str) -> str:
@@ -314,6 +346,14 @@ def build_tools(session: CallSession | None, end_call):
     async def get_suggestions(params: FunctionCallParams):
         """Οι ανοιχτές προτάσεις αναπαραγγελίας των πελατών του πωλητή, πιο επείγουσες πρώτα."""
         await run(params, session.overview())
+
+    async def list_items(params: FunctionCallParams, suggestion_id: str):
+        """Όλα τα είδη μιας πρότασης με ποσότητα και ημερομηνία εξάντλησης. Μόνο όταν ο πωλητής ρωτήσει «τι άλλο;».
+
+        Args:
+            suggestion_id: Το id της πρότασης.
+        """
+        await run(params, session.list_items(suggestion_id))
 
     async def explain_suggestion(params: FunctionCallParams, suggestion_id: str):
         """Εξήγηση της πρότασης (ρυθμός κατανάλωσης, τελευταία παραλαβή, εποχικότητα, προσφορά) από τα δεδομένα του συστήματος.
@@ -353,12 +393,13 @@ def build_tools(session: CallSession | None, end_call):
 
     if session is None:
         return [end_call]
-    return [get_suggestions, explain_suggestion, change_quantity, prepare_order, place_draft_order, end_call]
+    return [get_suggestions, list_items, explain_suggestion, change_quantity, prepare_order, place_draft_order, end_call]
 
 
 async def converse(room_name: str, session: CallSession | None, name: str, phone: str | None, *, outbound: bool):
     tag = f"[{room_name}]"
-    state = {"answered": not outbound, "spoke": False}
+    state = {"answered": not outbound, "spoke": False,
+             "m": {"turns": [], "lat": [], "barge": 0, "speaking": False, "bot_start": 0.0, "last_user": None}}
     task: PipelineTask | None = None
 
     async def tell(instruction: str):
@@ -477,6 +518,7 @@ async def converse(room_name: str, session: CallSession | None, name: str, phone
         if session and session.status != "failed":
             await session.set_status("ended")
         logger.info(f"{tag} Τέλος κλήσης. Drafts: {list(session.drafts.values()) if session else []}")
+        logger.info(f"{tag} Μετρήσεις: {call_metrics(state['m'])}")
 
 
 # ---------------------------------------------------------------------------

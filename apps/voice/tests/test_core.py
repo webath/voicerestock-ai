@@ -78,11 +78,23 @@ class Words(unittest.TestCase):
              "LINES": [line(1, 4), line(2, 42), line(3, 4), line(4, 13), line(5, 6), line(6, 2, rec=5), line(7, 1), line(8, 3), line(9, 2)]}
         rb = core.read_back(s)
         self.assertIn("δύο κιβώτια", rb)                     # το είδος που άλλαξε ο πωλητής λέγεται ΠΑΝΤΑ
-        self.assertIn("έξι ακόμα είδη στις ποσότητες της πρότασης", rb)
+        self.assertIn("επτά ακόμα είδη στις ποσότητες της πρότασης", rb)   # αλλαγμένο + ένα ακόμα, όχι περισσότερα
         self.assertIn("χίλια διακόσια εβδομήντα έξι ευρώ", rb)
         self.assertNotRegex(rb, r"\d")
         s["LINES"] = s["LINES"][:3]
         self.assertNotIn("ακόμα", core.read_back(s))         # μικρή παραγγελία: όλα τα είδη
+
+    def test_opening_line_is_short(self):
+        def line(m, dep):
+            return {"MTRL": m, "ITEM_NAME": f"Νερό {m}L κιβ. 6τεμ", "UNIT": "ΚΙΒ", "QTY1": 4, "QTY_RECOMMENDED": 4,
+                    "PREDICTED_DEPLETION_DATE": dep}
+        s = {"CUSTOMER_NAME": "Ξενοδοχείο Ανατολή Μ.Ε.Π.Ε.", "SUGGESTED_DELIVERY_DATE": "2026-11-05", "VALUE": 1275.6,
+             "LINES": [line(5, "2026-11-09"), line(1, "2026-11-06"), line(2, "2026-11-08")]}
+        o = core.opening_line(s)
+        self.assertTrue(o.startswith("Ξενοδοχείο Ανατολή: τελειώνει πρώτα Νερό ένα λίτρο γύρω στις έξι Νοεμβρίου"), o)
+        self.assertIn("και άλλα δύο είδη", o)
+        self.assertNotRegex(o, r"\d")
+        self.assertLess(len(o.split()), 35)                  # ~10 δευτερόλεπτα ομιλίας
 
     def test_priority_matches_dashboard_rules(self):
         def sug(urgency, last, interval, value=0, dep="2026-11-06"):
@@ -103,7 +115,7 @@ class Words(unittest.TestCase):
         with open(os.path.join(ROOT, "fixtures", "suggestions.sample.json"), encoding="utf-8") as f:
             fixture = json.load(f)
         for s in fixture["suggestions"]:
-            for text in [core.suggestion_brief(s), core.read_back(s)] + [core.explain_line(l) for l in s["LINES"]]:
+            for text in [core.suggestion_brief(s), core.read_back(s), core.opening_line(s), core.items_list(s)] + [core.explain_line(l) for l in s["LINES"]]:
                 self.assertNotRegex(text, r"\d", text)
 
 

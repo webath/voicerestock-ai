@@ -167,7 +167,29 @@ def suggestion_brief(s: dict) -> str:
             f"Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)}.")
 
 
-READ_BACK_FULL = 4   # μέχρι τόσα είδη διαβάζονται όλα· πάνω από αυτό η περίληψη θα κρατούσε μισό λεπτό
+def _first_out(s: dict) -> dict:
+    """Το είδος που τελειώνει πρώτο (αυτό λέγεται στην πρώτη ατάκα)."""
+    return min(s["LINES"], key=lambda l: l.get("PREDICTED_DEPLETION_DATE") or "9999")
+
+
+def opening_line(s: dict) -> str:
+    """ΜΙΑ σύντομη ατάκα ανά πελάτη (~8″): το πρώτο είδος που τελειώνει, πόσα ακόμα, αξία, παράδοση.
+    Στις πρώτες κλήσεις η πλήρης περιγραφή όλων των ειδών κρατούσε ~20″ και ο πωλητής διέκοπτε."""
+    l = _first_out(s)
+    rest = len(s["LINES"]) - 1
+    dep = l.get("PREDICTED_DEPLETION_DATE")
+    when = f" γύρω στις {spoken_day_month(dep)}" if dep else ""
+    more = "" if rest <= 0 else (", και ένα ακόμα είδος" if rest == 1 else f", και άλλα {num_words(rest)} είδη")
+    return (f"{spoken_customer(s['CUSTOMER_NAME'])}: τελειώνει πρώτα {spoken_item(l['ITEM_NAME'])}{when}{more}"
+            f"{value_phrase(s)}. Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}.")
+
+
+def items_list(s: dict) -> str:
+    """Όλα τα είδη με ποσότητα και εξάντληση — μόνο όταν ο πωλητής ρωτήσει «τι άλλο;»."""
+    return "· ".join(line_brief(l) for l in s["LINES"]) + "."
+
+
+READ_BACK_FULL = 3   # μέχρι τόσα είδη διαβάζονται όλα· πάνω από αυτό: τα αλλαγμένα + τα πρώτα, ως 2
 
 
 def read_back(s: dict) -> str:
@@ -180,7 +202,7 @@ def read_back(s: dict) -> str:
         items = ", ".join(say(l) for l in lines)
     else:
         changed = [l for l in lines if l["QTY1"] != l.get("QTY_RECOMMENDED", l["QTY1"])]
-        shown = changed + [l for l in lines if l not in changed][: max(0, 3 - len(changed))]
+        shown = changed + [l for l in lines if l not in changed][: max(0, 2 - len(changed))]
         rest = len(lines) - len(shown)
         items = ", ".join(say(l) for l in shown)
         if rest:
@@ -259,10 +281,9 @@ def priority_sort_key(s: dict):
     return (PRIORITY_ORDER.get(priority_of(s)[0], 5), -(s.get("VALUE") or 0), first)
 
 
-PRIORITY_NOTE = {
-    "critical": "ΚΡΙΣΙΜΟ: έχει χάσει τον συνηθισμένο κύκλο αγορών του, πιθανότατα έχει ήδη ξεμείνει. ",
-    "lost": "ΠΙΘΑΝΗ ΑΠΩΛΕΙΑ: δεν αγοράζει εδώ και πολύ καιρό. Πρότεινε στον πωλητή να πάρει τον πελάτη τηλέφωνο· "
-            "μην πιέσεις για παραγγελία. ",
+PRIORITY_NOTE = {   # ετικέτες για τη βοηθό· λέγονται σε λίγες λέξεις, όχι αυτούσιες
+    "critical": "[ΚΡΙΣΙΜΟ — μάλλον έχει ήδη ξεμείνει] ",
+    "lost": "[ΠΙΘΑΝΗ ΑΠΩΛΕΙΑ — δεν αγοράζει εδώ και καιρό· πρότεινε τηλέφωνο στον πελάτη, όχι παραγγελία] ",
 }
 
 
@@ -379,6 +400,13 @@ class CallSession:
             return {"status": "ok", "count": 0, "say": "Δεν υπάρχουν ανοιχτές προτάσεις αναπαραγγελίας για τους πελάτες σας."}
         return {"status": "ok", "count": len(open_),
                 "suggestions": [{"id": s["id"], "urgency": s["urgency"], "say": suggestion_brief(s)} for s in open_]}
+
+    async def list_items(self, suggestion_id: str) -> dict:
+        s = await self._fresh(suggestion_id)
+        if not s:
+            return self._err("Δεν βρέθηκε αυτή η πρόταση στους πελάτες σας.")
+        return {"status": "ok", "say": items_list(s),
+                "message": "Πες τα σύντομα· αν είναι πάνω από τέσσερα, πες τα τέσσερα πρώτα και ρώτα αν θέλει τα υπόλοιπα."}
 
     async def explain(self, suggestion_id: str) -> dict:
         s = await self._fresh(suggestion_id)
