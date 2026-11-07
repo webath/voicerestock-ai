@@ -28,6 +28,26 @@ CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT,
 """
 
 
+def _price_list() -> dict[int, float]:
+    import csv
+    with open(ROOT / "team_pack" / "data" / "MTRL.csv", encoding="utf-8-sig", newline="") as f:
+        return {int(r["MTRL"]): float(r["PRICER"]) for r in csv.DictReader(f)}
+
+
+PRICES = _price_list()
+
+
+def with_value(s: dict) -> dict:
+    """Αξία (€, καθαρή, τιμή καταλόγου 2026 × ποσότητα). Υπολογίζεται σε κάθε ανάγνωση → ακολουθεί τις αλλαγές ποσότητας."""
+    total = 0.0
+    for l in s["LINES"]:
+        l["PRICE"] = PRICES.get(l["MTRL"])
+        l["LINE_VALUE"] = round((l["PRICE"] or 0) * l["QTY1"], 2)
+        total += l["LINE_VALUE"]
+    s["VALUE"] = round(total, 2)
+    return s
+
+
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -63,13 +83,14 @@ class Store:
 
     # ---- suggestions ----
     def all(self) -> list[dict]:
-        return [json.loads(b) for (b,) in self.db.execute("SELECT body FROM suggestions")]
+        return [with_value(json.loads(b)) for (b,) in self.db.execute("SELECT body FROM suggestions")]
 
     def get(self, sid: str) -> dict | None:
         r = self.db.execute("SELECT body FROM suggestions WHERE id = ?", (sid,)).fetchone()
-        return json.loads(r[0]) if r else None
+        return with_value(json.loads(r[0])) if r else None
 
     def put(self, s: dict) -> None:
+        with_value(s)
         s["updated_at"] = now()
         with self.db:
             self.db.execute("UPDATE suggestions SET body = ? WHERE id = ?", (json.dumps(s, ensure_ascii=False), s["id"]))

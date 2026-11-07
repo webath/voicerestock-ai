@@ -157,3 +157,15 @@ def test_idempotency_key_is_scoped_to_suggestion(env):
         assert r.status_code == 200
     assert len(erp.calls) == 2                                   # δύο διαφορετικά drafts
     assert c.get(f"/api/suggestions/{a}").json()["erp_draft_id"] != c.get(f"/api/suggestions/{b}").json()["erp_draft_id"]
+
+
+def test_value_follows_quantity(env):
+    c, erp, sid = env
+    s = c.get(f"/api/suggestions/{sid}").json()
+    l = s["LINES"][0]
+    assert s["VALUE"] == round(sum(x["PRICE"] * x["QTY1"] for x in s["LINES"]), 2)
+    n = c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": l["QTY1"] + 1, "version": 1}).json()
+    assert round(n["VALUE"] - s["VALUE"], 2) == round(l["PRICE"], 2)
+    tok = c.post(f"/api/suggestions/{sid}/confirm", json={"version": 2}).json()["confirmation_token"]
+    c.post(f"/api/suggestions/{sid}/create-draft", json={"confirmation_token": tok, "idempotency_key": "v"})
+    assert "VALUE" not in erp.calls[0] and "PRICE" not in erp.calls[0]["LINES"][0]   # το ERP payload δεν αλλάζει

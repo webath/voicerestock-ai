@@ -47,6 +47,7 @@ Twilio ⇄ Voice :8100 ──HTTP──▶ App API :8000 ──HTTP──▶ Moc
   "REASON": "Το Ice tea λεμόνι τελειώνει στις 6/11",
   "LINES": [ /* SuggestionLine[] */ ],
   "erp_draft_id": null,             // γεμίζει μετά το create-draft
+  "VALUE": 412.80,                  // € καθαρά: Σ QTY1 × PRICE (υπολογίζεται από το API, δεν πάει στο ERP)
   "updated_at": "2026-11-01T09:00:00Z"
 }
 ```
@@ -65,6 +66,8 @@ Twilio ⇄ Voice :8100 ──HTTP──▶ App API :8000 ──HTTP──▶ Moc
   "QTY_MAX": 12,
   "PREDICTED_DEPLETION_DATE": "2026-11-06",
   "CONFIDENCE": 0.8,                // από το μοντέλο, ΟΧΙ από LLM
+  "PRICE": 8.9,                     // τιμή καταλόγου 2026 (MTRL.PRICER), € ανά UNIT — από το API
+  "LINE_VALUE": 35.6,               // QTY1 × PRICE — από το API
   "evidence": { /* Evidence */ }
 }
 ```

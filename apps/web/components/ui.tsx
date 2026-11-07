@@ -151,11 +151,33 @@ export function ErrorBox({ message }: { message: string }) {
   );
 }
 
+/** Skeleton: το σχήμα της σελίδας με «λάμψη» αντί για «Φόρτωση…». */
 export function Loading() {
   return (
-    <div className="flex items-center justify-center gap-2 py-16 text-sm text-ink-muted" role="status">
-      <span className="pulse-dot inline-block h-2 w-2 rounded-full" style={{ background: "var(--series-1)" }} />
-      Φόρτωση…
+    <div role="status" aria-label="Φόρτωση" className="fade-in">
+      <div className="mb-7 space-y-2">
+        <div className="skeleton h-3 w-32" />
+        <div className="skeleton h-7 w-64" />
+        <div className="skeleton h-3 w-96 max-w-full" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="card space-y-3 p-5"><div className="skeleton h-3 w-24" /><div className="skeleton h-8 w-20" /><div className="skeleton h-2.5 w-32" /></div>
+        ))}
+      </div>
+      <div className="card mt-6 space-y-3 p-5">
+        {[0, 1, 2, 3, 4].map((i) => <div key={i} className="skeleton h-4" style={{ width: `${90 - i * 9}%` }} />)}
+      </div>
+      <span className="sr-only">Φόρτωση…</span>
+    </div>
+  );
+}
+
+/** Μικρό skeleton για κομμάτι σελίδας (π.χ. εξήγηση που ετοιμάζεται). */
+export function SkeletonLines({ lines = 3 }: { lines?: number }) {
+  return (
+    <div className="space-y-2" aria-hidden>
+      {Array.from({ length: lines }, (_, i) => <div key={i} className="skeleton h-3" style={{ width: `${100 - i * 14}%` }} />)}
     </div>
   );
 }

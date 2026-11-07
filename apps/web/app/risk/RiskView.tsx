@@ -50,6 +50,23 @@ export function RiskView() {
     && (!needle || `${r.CUSTOMER_NAME} ${r.ITEM_NAME}`.toLowerCase().includes(needle)));
   const customers = new Set(rows.map((r) => r.TRDR)).size;
 
+  function exportCsv() {
+    const head = ["Πελάτης", "Τύπος", "Περιοχή", "Είδος", "Εξάντληση", "Σε μέρες", "Confidence", "Προτεινόμενη ποσότητα", "Μονάδα"];
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = rows.map((r) => {
+      const q = qtyBy.get(`${r.TRDR}-${r.MTRL}`);
+      return [r.CUSTOMER_NAME, r.CUSTOMER_CATEGORY, r.AREA, r.ITEM_NAME, r.PREDICTED_DEPLETION_DATE, r.days_left,
+        Math.round(r.CONFIDENCE * 100) + "%", q?.qty ?? "", q?.unit ?? ""].map(esc).join(";");
+    });
+    // BOM + «;» ώστε το ελληνικό Excel να το ανοίγει σωστά
+    const blob = new Blob(["\ufeff" + [head.map(esc).join(";"), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `at-risk_${f.salesman || "ολοι"}_${f.horizon}μερες.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   if (risk.error) return <ErrorBox message={risk.error} />;
   if (!risk.data) return <Loading />;
 
@@ -71,9 +88,12 @@ export function RiskView() {
           options={[{ value: "3", label: "3 μέρες" }, { value: "7", label: "7 μέρες" }, { value: "14", label: "14 μέρες" }]} />
       </FilterBar>
 
-      <p className="fade-in mb-3 text-sm text-ink-2">
-        <strong className="text-ink">{fmtNum(rows.length)}</strong> είδη σε <strong className="text-ink">{fmtNum(customers)}</strong> πελάτες
-      </p>
+      <div className="fade-in mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-ink-2">
+          <strong className="text-ink">{fmtNum(rows.length)}</strong> είδη σε <strong className="text-ink">{fmtNum(customers)}</strong> πελάτες
+        </p>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={exportCsv} disabled={rows.length === 0}>⤓ Εξαγωγή CSV</button>
+      </div>
 
       {rows.length === 0 ? (
         <EmptyState title="Κανένα είδος με αυτά τα φίλτρα">Δοκίμασε μεγαλύτερο ορίζοντα ή άλλον πωλητή.</EmptyState>

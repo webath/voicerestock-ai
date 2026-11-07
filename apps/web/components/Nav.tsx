@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CommandPalette } from "./CommandPalette";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
   { href: "/", label: "Επισκόπηση" },
@@ -29,6 +31,10 @@ export function NavFrame({ path }: { path: string | null }) {
           {NAV.map((n) => (
             <Link key={n.href} href={n.href} aria-current={active(n.href) ? "page" : undefined}>{n.label}</Link>
           ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <CommandPalette />
+          <ThemeToggle />
         </div>
       </nav>
     </header>
