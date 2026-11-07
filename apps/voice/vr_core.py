@@ -113,7 +113,7 @@ def spoken_item(name: str) -> str:
         if v == 0.5:
             return "μισό λίτρο"
         return f"{w(round(v * 1000))} ml" if v < 1 else f"{w(m.group(1))} κόμμα {w(m.group(2))} λίτρα"
-    s = re.sub(r"(\d+),(\d+)\s*L\b", decimal_litres, s)
+    s = re.sub(r"(\d+)[,.](\d+)\s*L\b", decimal_litres, s)
     unit = lambda one, many: (lambda m: f"{w(m.group(1))} {one if m.group(1) == '1' else many}")  # noqa: E731
     s = re.sub(r"(\d+)\s*L\b", unit("λίτρο", "λίτρα"), s)
     s = re.sub(r"(\d+)\s*kg\b", unit("κιλό", "κιλά"), s)
@@ -155,10 +155,13 @@ def line_brief(line: dict) -> str:
     return f"{spoken_item(line['ITEM_NAME'])}: {ends}· πρόταση {qty_words(line['QTY1'], line['UNIT'])}"
 
 
-def value_phrase(s: dict) -> str:
-    """«, αξία περίπου … ευρώ σε τιμές καταλόγου» — μόνο αν τη δίνει το App API (πεδίο VALUE)."""
+def value_phrase(s: dict, list_prices: bool = True) -> str:
+    """«, αξία περίπου … ευρώ σε τιμές καταλόγου» — μόνο αν τη δίνει το App API (πεδίο VALUE).
+    Στην περίληψη χωρίς «σε τιμές καταλόγου»: ειπώθηκε ήδη στην πρώτη γραμμή και κάθε λέξη εκεί κοστίζει."""
     v = s.get("VALUE")
-    return f", αξία περίπου {euro_words(v)} σε τιμές καταλόγου" if isinstance(v, (int, float)) and v > 0 else ""
+    if not (isinstance(v, (int, float)) and v > 0):
+        return ""
+    return f", αξία περίπου {euro_words(v)}" + (" σε τιμές καταλόγου" if list_prices else "")
 
 
 def suggestion_brief(s: dict) -> str:
@@ -207,8 +210,8 @@ def read_back(s: dict) -> str:
         items = ", ".join(say(l) for l in shown)
         if rest:
             items += f", και {'ένα ακόμα είδος' if rest == 1 else num_words(rest) + ' ακόμα είδη'} στις ποσότητες της πρότασης"
-    return (f"Επιβεβαιώνετε draft παραγγελίας για τον πελάτη {spoken_customer(s['CUSTOMER_NAME'])}: {items}, "
-            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)};")
+    return (f"Επιβεβαιώνετε πρόχειρη παραγγελία για τον πελάτη {spoken_customer(s['CUSTOMER_NAME'])}: {items}, "
+            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s, list_prices=False)};")
 
 
 def explain_line(line: dict) -> str:
@@ -455,7 +458,7 @@ class CallSession:
         if not s:
             return self._err("Δεν βρέθηκε αυτή η πρόταση στους πελάτες σας.")
         if s["status"] == "draft_created":
-            return {"status": "already_created", "say": f"Γι' αυτόν τον πελάτη έχει ήδη δημιουργηθεί draft."}
+            return {"status": "already_created", "say": f"Γι' αυτόν τον πελάτη έχει ήδη δημιουργηθεί πρόχειρη παραγγελία."}
         if s["status"] not in OPEN_STATUSES:
             return self._err(f"Η πρόταση δεν μπορεί να γίνει παραγγελία (κατάσταση {s['status']}).")
         self.pending[suggestion_id] = s["version"]
@@ -470,7 +473,7 @@ class CallSession:
         """Βήμα 2/2: μετά από ρητό «ναι» στην περίληψη → confirm + create-draft, exactly-once."""
         if suggestion_id in self.drafts:
             return {"status": "draft_created", "erp_draft_id": self.drafts[suggestion_id],
-                    "say": "Το draft έχει ήδη δημιουργηθεί."}
+                    "say": "Η πρόχειρη παραγγελία έχει ήδη δημιουργηθεί."}
         version = self.pending.get(suggestion_id)
         if version is None:
             return self._err("Δεν έχει διαβαστεί περίληψη για επιβεβαίωση. Κάλεσε πρώτα prepare_order.")
@@ -487,7 +490,7 @@ class CallSession:
             return self._err(not_yet, say=read_back(s))
         code, conf = await self.req("POST", f"/api/suggestions/{suggestion_id}/confirm", {"version": version})
         if code != 200 or not conf.get("confirmation_token"):
-            return self._err("Η επιβεβαίωση απέτυχε στο σύστημα. Δεν δημιουργήθηκε draft.")
+            return self._err("Η επιβεβαίωση απέτυχε στο σύστημα. Δεν δημιουργήθηκε πρόχειρη παραγγελία.")
         await self.set_status("posting_draft", suggestion_id=suggestion_id)
         key = f"{self.call_id}:{suggestion_id}:v{version}"
         code, out = await self.req("POST", f"/api/suggestions/{suggestion_id}/create-draft",
@@ -499,7 +502,7 @@ class CallSession:
             await self.set_status("draft_created", suggestion_id=suggestion_id, erp_draft_id=did)
             tail = spoken_digits(did.split("-")[-1])
             return {"status": "draft_created", "erp_draft_id": did,
-                    "say": f"Το ERP δημιούργησε το draft. Ο κωδικός τελειώνει σε {tail} και φαίνεται στο dashboard."}
+                    "say": f"Το ERP δημιούργησε την πρόχειρη παραγγελία. Ο κωδικός τελειώνει σε {tail} και φαίνεται στο dashboard."}
         await self.set_status("discussing", suggestion_id=suggestion_id)
-        return self._err("Το ERP δεν επιβεβαίωσε τη δημιουργία draft. ΔΕΝ δημιουργήθηκε παραγγελία· "
+        return self._err("Το ERP δεν επιβεβαίωσε τη δημιουργία πρόχειρης παραγγελίας. ΔΕΝ δημιουργήθηκε παραγγελία· "
                          "ο πωλητής μπορεί να το δει στο dashboard.", http=code)

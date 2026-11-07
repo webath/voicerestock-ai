@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndFrame,
     LLMContextFrame,
+    ProposedUserStartedSpeakingFrame,
     TranscriptionFrame,
     TTSTextFrame,
 )
@@ -115,9 +116,27 @@ def api_request(actor: str):
 
 
 async def post_call_event(**body):
-    async with http.post(APP_API_URL + "/api/calls/events", json=body, headers={"X-Actor": f"voice:{body.get('call_sid')}"},
-                         timeout=aiohttp.ClientTimeout(total=5)) as r:
-        await r.read()
+    try:
+        async with http.post(APP_API_URL + "/api/calls/events", json=body,
+                             headers={"X-Actor": f"voice:{body.get('call_sid')}"},
+                             timeout=aiohttp.ClientTimeout(total=5)) as r:
+            await r.read()
+    except Exception as e:
+        logger.warning(f"[{body.get('call_sid')}] /api/calls/events ({body.get('status') or body.get('type')}): "
+                       f"{type(e).__name__} {e}")
+        raise
+
+
+_bg: set = set()   # αναφορές σε tasks του τέλους κλήσης (αλλιώς ο garbage collector μπορεί να τα κόψει)
+
+
+def detach(coro) -> asyncio.Task:
+    """Τρέχει ανεξάρτητα από το task της κλήσης: όταν η κλήση ακυρώνεται, κάθε await στο finally αποτυγχάνει
+    αμέσως — έτσι το «ended» δεν έφτανε ποτέ στο dashboard (κλήση 7/11, 12:31)."""
+    t = asyncio.create_task(coro)
+    _bg.add(t)
+    t.add_done_callback(_bg.discard)
+    return t
 
 
 async def salesman_name(salesman: int) -> str:
@@ -176,7 +195,7 @@ DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρεμπορίου τροφίμων και
 
 === ΓΛΩΣΣΑ ===
 Μόνο ελληνικές λέξεις (εκτός από ονόματα προϊόντων, π.χ. «Ice tea»). Ποτέ αγγλικά («hello», «okay»), ποτέ
-ήχους, σφυρίγματα ή ηχητικές ενδείξεις, ποτέ κείμενο σε αγκύλες.
+ήχους, σφυρίγματα ή ηχητικές ενδείξεις, ποτέ κείμενο σε αγκύλες. Το «draft» το λες «πρόχειρη παραγγελία».
 
 === ΠΡΟΤΑΣΕΙΣ ΤΟΥ ΣΥΣΤΗΜΑΤΟΣ ΠΡΟΒΛΕΨΗΣ (η ΜΟΝΗ σου πηγή, σειρά: πιο επείγον πρώτα) ===
 {listing}
@@ -303,12 +322,14 @@ class UserWatch(CallWatch):
 
     async def process_frame(self, frame, direction: FrameDirection):
         await FrameProcessor.process_frame(self, frame, direction)
+        if isinstance(frame, ProposedUserStartedSpeakingFrame) and self._state["m"]["speaking"]:
+            self._state["m"]["barge"] += 1                              # ο πωλητής ΑΡΧΙΣΕ να μιλά πάνω στη βοηθό
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             logger.info(f"{self._tag} Πωλητής: {frame.text}" if LOG_TRANSCRIPTS else f"{self._tag} Πωλητής μίλησε")
             m = self._state["m"]
-            if m["speaking"]:
-                m["barge"] += 1                                     # μίλησε πάνω στη βοηθό
-            m["last_user"] = time.monotonic()
+            # Το κείμενο του πωλητή έρχεται στο ΤΕΛΟΣ της σειράς του, συχνά αφού η βοηθός άρχισε να απαντά.
+            # Τότε δεν περιμένει κανείς — μετράμε καθυστέρηση μόνο όταν η βοηθός σωπαίνει.
+            m["last_user"] = None if m["speaking"] else time.monotonic()
             if self._session:
                 self._session.note_user(frame.text)   # φύλακας: μίλησε ο πωλητής (μετά την περίληψη;)
             self._post(type="transcript", role="user", text=frame.text.strip())
@@ -510,13 +531,18 @@ async def converse(room_name: str, session: CallSession | None, name: str, phone
     except Exception as e:
         logger.error(f"{tag} Σφάλμα κλήσης: {e}")
     finally:
+        async def _close():
+            try:
+                async with api.LiveKitAPI() as lk:
+                    await lk.room.delete_room(api.DeleteRoomRequest(room=room_name))
+            except Exception:
+                pass
+            if session and session.status != "failed":
+                await session.set_status("ended")
         try:
-            async with api.LiveKitAPI() as lk:
-                await lk.room.delete_room(api.DeleteRoomRequest(room=room_name))
-        except Exception:
-            pass
-        if session and session.status != "failed":
-            await session.set_status("ended")
+            await asyncio.shield(detach(_close()))
+        except BaseException:
+            pass   # η κλήση ακυρώνεται· το _close() συνεχίζει μόνο του
         logger.info(f"{tag} Τέλος κλήσης. Drafts: {list(session.drafts.values()) if session else []}")
         logger.info(f"{tag} Μετρήσεις: {call_metrics(state['m'])}")
 
