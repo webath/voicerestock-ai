@@ -7,10 +7,28 @@ import { CALL_STEPS, CallStatusBadge, isLive, stepIndex } from "@/components/Cal
 import { Card, EmptyState, ErrorBox, Loading, PageHeader, Select } from "@/components/ui";
 import { ApiError, apiPost, useApi, VOICE_TOKEN, VOICE_URL, type Call, type Salesman, type Suggestion } from "@/lib/api";
 import { fmtNum } from "@/lib/format";
+import { byPriority, priorityOf } from "@/lib/priority";
 
 const time = new Intl.DateTimeFormat("el-GR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const isSim = (c: Call) => c.call_sid.startsWith("SIM-");
-const PRIORITY_LABEL: Record<string, string> = { critical: "κρίσιμος", high: "επείγων", medium: "μέτριος", low: "χαμηλός" };
+const PRIORITY_LABEL: Record<string, string> = { critical: "κρίσιμος", high: "επείγων", lost: "πιθανή απώλεια", medium: "μέτριος", low: "χαμηλός" };
+const TUNNEL_CMD = "VPS_KEY=~/.ssh/id_ed25519 apps/voice/deploy/tunnel.sh";
+
+interface VoiceHealth { ok: boolean; active_calls: string[]; quiet_hours: boolean; salesmen_with_phone: number[] }
+
+/** Ζει ο voice agent (VPS, μέσω tunnel); Ρωτάμε το /voice/health κάθε 5″ — χωρίς αυτό η live κλήση δεν φεύγει. */
+function useVoiceHealth() {
+  const [h, setH] = useState<VoiceHealth | null | "down">(null);
+  useEffect(() => {
+    let alive = true;
+    const check = () => fetch(`${VOICE_URL}/voice/health`, { signal: AbortSignal.timeout(3000) })
+      .then((r) => r.json()).then((j: VoiceHealth) => alive && setH(j)).catch(() => alive && setH("down"));
+    check();
+    const id = setInterval(check, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  return h;
+}
 
 /** Φωνή του browser (el-GR) για την προσομοίωση: η VORA με την πρώτη ελληνική φωνή, ο πωλητής με δεύτερη ή πιο βαθιά. */
 function speak(text: string, agent: boolean) {
@@ -35,6 +53,7 @@ export function VoiceView() {
   const [dialing, setDialing] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [simulating, setSimulating] = useState(false);
+  const health = useVoiceHealth();
   const [simMsg, setSimMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [sound, setSound] = useState(true);
   const spoken = useRef<Set<string> | null>(null);
@@ -82,17 +101,22 @@ export function VoiceView() {
   const list = salesmen.data ?? [];
   const fallback = list.find((s) => s.phone) ?? list.find((s) => s.PRSN === 105) ?? list[0];
   const selected = who || String(fallback?.PRSN ?? "");
+  // Από ποιον πελάτη θα ξεκινήσει η κλήση: ίδια σειρά με τον voice agent (vr_core.priority_sort_key)
+  const next = (sugs.data ?? []).filter((s) => s.SALESMAN === Number(selected) && (s.status === "proposed" || s.status === "modified"))
+    .sort(byPriority)[0];
+  const online = health !== null && health !== "down" && health.ok;
+  const hasPhone = online && health.salesmen_with_phone.includes(Number(selected));
 
   async function dial() {
     setDialing(true); setMsg(null);
     try {
       await apiPost("/voice/calls", { salesman: Number(selected) }, VOICE_URL, VOICE_TOKEN ? { "X-Voice-Token": VOICE_TOKEN } : {});
-      setMsg({ ok: true, text: "Η κλήση ξεκίνησε — θα εμφανιστεί παρακάτω σε λίγα δευτερόλεπτα." });
+      setMsg({ ok: true, text: `Το κινητό χτυπά σε λίγα δευτερόλεπτα${next ? ` — η VORA ξεκινά από τον πελάτη ${next.CUSTOMER_NAME}` : ""}. Η κλήση εμφανίζεται live δεξιά.` });
       toast({ kind: "success", title: "Η κλήση ξεκίνησε", text: `Ο AI βοηθός καλεί τον/την ${names.get(Number(selected)) ?? selected}.` });
       calls.reload();
     } catch (e) {
       setMsg({ ok: false, text: e instanceof TypeError
-        ? `Ο voice agent δεν απαντά στο ${VOICE_URL}. Τρέχει το apps/voice;`
+        ? `Ο voice agent δεν απαντά στο ${VOICE_URL}. Άνοιξε το tunnel: ${TUNNEL_CMD}`
         : (e as Error).message });
       toast({ kind: "error", title: "Η κλήση δεν ξεκίνησε", text: e instanceof TypeError ? `Ο voice agent δεν απαντά (${VOICE_URL}).` : (e as Error).message });
     } finally { setDialing(false); }
@@ -124,8 +148,15 @@ export function VoiceView() {
           <div className="flex flex-col gap-3">
             <Select label="Πωλητής" value={selected} onChange={setWho}
               options={(salesmen.data ?? []).map((s) => ({ value: String(s.PRSN), label: `${s.NAME} · ${fmtNum(pending.get(s.PRSN) ?? 0)} προτάσεις` }))} />
+            <VoiceStatus health={health} hasPhone={hasPhone} />
+            {next && (
+              <p className="text-xs text-ink-2">
+                Η VORA θα ξεκινήσει από τον πιο επείγοντα: <strong className="text-ink">{next.CUSTOMER_NAME}</strong>{" "}
+                ({PRIORITY_LABEL[priorityOf(next).priority] ?? priorityOf(next).priority})
+              </p>
+            )}
             <button className="btn btn-primary" onClick={dial} disabled={dialing || !selected}>
-              {dialing ? "Κλήση…" : "📞 Κάλεσε τον πωλητή"}
+              {dialing ? <><span className="ai-dots" aria-hidden><i /><i /><i /></span> Καλεί…</> : "📞 Live κλήση στο κινητό"}
             </button>
             {msg && (
               <p role="status" className="fade-in text-sm text-ink-2">
@@ -139,12 +170,12 @@ export function VoiceView() {
             </ul>
 
             <div className="mt-2 border-t border-[var(--grid)] pt-4">
-              <div className="mb-1 text-sm font-semibold text-ink">Προσομοίωση κλήσης</div>
+              <div className="mb-1 text-sm font-semibold text-ink">Plan B · χωρίς τηλέφωνο</div>
               <p className="mb-3 text-xs text-ink-2">
-                Χωρίς τηλέφωνο: η VORA «καλεί» τον πωλητή για τον πιο επείγοντα at-risk πελάτη του. Οι ατάκες του πωλητή
-                είναι έτοιμες· η αλλαγή ποσότητας και το draft περνούν κανονικά από το App API στο ERP.
+                Αν πέσει το δίκτυο ή το τηλέφωνο: η ίδια κλήση παίζεται στην οθόνη, με φωνή από τον browser. Οι ατάκες του
+                πωλητή είναι έτοιμες· η αλλαγή ποσότητας και το draft περνούν κανονικά από το App API στο ERP.
               </p>
-              <button className="btn btn-primary w-full" onClick={simulate} disabled={simulating || !selected}>
+              <button className="btn btn-ghost w-full" onClick={simulate} disabled={simulating || !selected}>
                 {simulating ? <><span className="ai-dots" aria-hidden><i /><i /><i /></span> Καλεί…</> : "▶ Προσομοίωση κλήσης"}
               </button>
               <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-ink-2">
@@ -169,6 +200,24 @@ export function VoiceView() {
         </div>
       </div>
     </>
+  );
+}
+
+function VoiceStatus({ health, hasPhone }: { health: VoiceHealth | null | "down"; hasPhone: boolean }) {
+  const [color, text, hint] =
+    health === null ? ["var(--ink-muted)", "Έλεγχος voice agent…", null]
+    : health === "down" || !health.ok ? ["var(--critical)", "Ο voice agent δεν απαντά", <>Άνοιξε το tunnel σε ένα terminal: <code className="break-all">{TUNNEL_CMD}</code></>]
+    : health.quiet_hours ? ["var(--warning)", "Voice agent online · ώρες ησυχίας", "Οι κλήσεις δεν φεύγουν τώρα (QUIET_HOURS στο VPS)."]
+    : !hasPhone ? ["var(--warning)", "Voice agent online", "Αυτός ο πωλητής δεν έχει κινητό στο VPS — διάλεξε τον Στέλιο Παπαγεωργίου."]
+    : health.active_calls.length ? ["var(--series-1)", "Voice agent online · κλήση σε εξέλιξη", null]
+    : ["var(--good)", "Voice agent online · έτοιμος να καλέσει", null];
+  return (
+    <div role="status" className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs">
+      <div className="flex items-center gap-2 font-semibold text-ink">
+        <span aria-hidden className={health && health !== "down" && health.ok ? "pulse-dot" : ""} style={{ color }}>●</span>{text}
+      </div>
+      {hint && <div className="mt-1 text-ink-2">{hint}</div>}
+    </div>
   );
 }
 
