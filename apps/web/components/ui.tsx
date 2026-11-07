@@ -1,155 +1,161 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
-import { CALL_STATUS, SUGGESTION_STATUS, URGENCY } from "@/lib/format";
-import type { CallStatus, SuggestionStatus, Urgency } from "@/lib/types";
+import type { Urgency } from "@/lib/api";
 
-export type Tone = "neutral" | "info" | "good" | "warning" | "critical";
-
-const TONE: Record<Tone, string> = {
-  neutral: "bg-surface-2 text-ink-2 ring-line",
-  info: "bg-tint-info text-ink ring-line",
-  good: "bg-tint-good text-good-ink ring-line",
-  warning: "bg-tint-warning text-ink ring-line",
-  critical: "bg-tint-critical text-critical ring-line",
-};
-
-const DOT: Record<Tone, string> = {
-  neutral: "bg-muted",
-  info: "bg-series",
-  good: "bg-good",
-  warning: "bg-warning",
-  critical: "bg-critical",
-};
-
-export function Badge({ tone = "neutral", children, dot = true, title }: { tone?: Tone; children: ReactNode; dot?: boolean; title?: string }) {
+export function PageHeader({ title, subtitle, eyebrow, children }: {
+  title: string; subtitle?: ReactNode; eyebrow?: ReactNode; children?: ReactNode;
+}) {
   return (
-    <span title={title} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${TONE[tone]}`}>
-      {dot && <span aria-hidden className={`size-1.5 rounded-full ${DOT[tone]}`} />}
+    <div className="fade-in mb-7 flex flex-wrap items-end justify-between gap-4">
+      <div>
+        {eyebrow && <div className="mb-1 text-xs font-medium uppercase tracking-[0.14em] text-ink-muted">{eyebrow}</div>}
+        <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-ink">{title}</h1>
+        {subtitle && <p className="mt-1.5 max-w-2xl text-sm text-ink-2">{subtitle}</p>}
+      </div>
       {children}
-    </span>
+    </div>
   );
 }
 
-/** Επείγον: χρώμα + εικονίδιο + λέξη (ποτέ μόνο χρώμα). */
+export function Card({ title, subtitle, action, children, className = "", lift = false }: {
+  title?: ReactNode; subtitle?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; lift?: boolean;
+}) {
+  return (
+    <section className={`card min-w-0 p-5 ${lift ? "lift" : ""} ${className}`}>
+      {(title || action) && (
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {title && <h2 className="text-base font-semibold text-ink">{title}</h2>}
+            {subtitle && <p className="mt-0.5 text-sm text-ink-2">{subtitle}</p>}
+          </div>
+          {action}
+        </div>
+      )}
+      {!title && subtitle && <p className="text-sm text-ink-2">{subtitle}</p>}
+      <div className={title || subtitle || action ? "mt-4" : ""}>{children}</div>
+    </section>
+  );
+}
+
+/** Stat tile: label · value · (προαιρετικά) σημείωση. */
+export function StatTile({ label, value, note, hero = false }: { label: string; value: ReactNode; note?: ReactNode; hero?: boolean }) {
+  return (
+    <div className="card lift min-w-0 p-5">
+      <div className="text-sm text-ink-2">{label}</div>
+      <div className={`mt-1 font-semibold tracking-tight text-ink ${hero ? "text-5xl" : "text-3xl"}`}>{value}</div>
+      {note && <div className="mt-1.5 text-xs text-ink-muted">{note}</div>}
+    </div>
+  );
+}
+
+const URGENCY: Record<Urgency, { label: string; color: string; icon: string }> = {
+  high: { label: "Επείγον", color: "var(--critical)", icon: "●" },
+  medium: { label: "Σύντομα", color: "var(--serious)", icon: "◐" },
+  low: { label: "Χαμηλό", color: "var(--good)", icon: "○" },
+  none: { label: "Καμία εξάντληση σε 90 μέρες", color: "var(--ink-muted)", icon: "–" },
+};
+
+/** Status = εικονίδιο + κείμενο, ποτέ μόνο χρώμα. */
 export function UrgencyBadge({ urgency }: { urgency: Urgency }) {
   const u = URGENCY[urgency];
-  const ink = u.tone === "critical" ? "text-critical" : u.tone === "warning" ? "text-ink" : "text-ink-2";
-  const icon = u.tone === "critical" ? "text-critical" : u.tone === "warning" ? "text-warning" : "text-muted";
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold ${ink}`}>
-      <span aria-hidden className={icon}>{u.icon}</span>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
+      <span aria-hidden style={{ color: u.color }}>{u.icon}</span>
       {u.label}
     </span>
   );
 }
 
-export function SuggestionStatusBadge({ status }: { status: SuggestionStatus }) {
-  const s = SUGGESTION_STATUS[status] ?? { label: status, tone: "neutral" as Tone };
-  return <Badge tone={s.tone}>{s.label}</Badge>;
-}
+const STATUS: Record<string, { label: string; color: string; icon: string }> = {
+  proposed: { label: "Προς έγκριση", color: "var(--ink-muted)", icon: "○" },
+  modified: { label: "Τροποποιημένη", color: "var(--series-1)", icon: "◐" },
+  confirmed: { label: "Επιβεβαιωμένη", color: "var(--series-1)", icon: "◑" },
+  posting: { label: "Αποστολή…", color: "var(--warning)", icon: "◌" },
+  draft_created: { label: "Draft στο ERP", color: "var(--good)", icon: "✓" },
+  failed: { label: "Αποτυχία ERP", color: "var(--critical)", icon: "!" },
+  cancelled: { label: "Ακυρώθηκε", color: "var(--ink-muted)", icon: "×" },
+};
 
-export function CallStatusBadge({ status }: { status: CallStatus }) {
-  const s = CALL_STATUS[status] ?? { label: status, tone: "neutral" as Tone, live: false };
-  return <Badge tone={s.tone}>{s.label}</Badge>;
-}
-
-export function Card({ children, className = "", title, action, id }: { children: ReactNode; className?: string; title?: ReactNode; action?: ReactNode; id?: string }) {
+export function StatusBadge({ status }: { status: string }) {
+  const s = STATUS[status] ?? { label: status, color: "var(--ink-muted)", icon: "•" };
   return (
-    <section id={id} className={`rounded-xl bg-surface ring-1 ring-line ${className}`}>
-      {(title || action) && (
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
-          <h2 className="text-sm font-semibold text-ink">{title}</h2>
-          {action}
-        </header>
-      )}
-      {children}
-    </section>
-  );
-}
-
-export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: ReactNode; action?: ReactNode }) {
-  return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-ink-2">{subtitle}</p>}
-      </div>
-      {action}
-    </div>
-  );
-}
-
-export function Stat({ label, value, hint, href }: { label: string; value: ReactNode; hint?: ReactNode; href?: string }) {
-  const body = (
-    <>
-      <div className="text-xs font-medium text-ink-2">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tracking-tight text-ink">{value}</div>
-      {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
-    </>
-  );
-  const cls = "block rounded-xl bg-surface p-4 ring-1 ring-line";
-  return href ? (
-    <Link href={href} className={`${cls} transition hover:ring-axis`}>{body}</Link>
-  ) : (
-    <div className={cls}>{body}</div>
-  );
-}
-
-export function ErrorBox({ error, onRetry }: { error: { message: string }; onRetry?: () => void }) {
-  return (
-    <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-tint-critical px-4 py-3 text-sm text-ink ring-1 ring-line">
-      <span>
-        <span aria-hidden className="mr-1.5 text-critical">✕</span>
-        {error.message}
-      </span>
-      {onRetry && (
-        <button onClick={onRetry} className="rounded-md px-2 py-1 text-xs font-medium ring-1 ring-line hover:bg-surface">
-          Ξανά
-        </button>
-      )}
-    </div>
-  );
-}
-
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className="px-4 py-10 text-center text-sm text-muted">{children}</div>;
-}
-
-export function Skeleton({ className = "h-24" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-xl bg-surface-2 ${className}`} />;
-}
-
-export function PageSkeleton() {
-  return (
-    <div className="space-y-4">
-      <Skeleton className="h-8 w-60" />
-      <Skeleton className="h-28" />
-      <Skeleton className="h-64" />
-    </div>
-  );
-}
-
-/** Λεπτή μπάρα βεβαιότητας (μία σειρά, ένα χρώμα) + ποσοστό σε κείμενο. */
-export function ConfidenceBar({ value }: { value: number | null }) {
-  if (value == null) return <span className="text-xs text-muted">—</span>;
-  return (
-    <span className="inline-flex items-center gap-2" title={`Βεβαιότητα μοντέλου ${Math.round(value * 100)}%`}>
-      <span className="h-1.5 w-14 overflow-hidden rounded-full bg-surface-2">
-        <span className="block h-full rounded-full bg-series" style={{ width: `${Math.round(value * 100)}%` }} />
-      </span>
-      <span className="tabular text-xs text-ink-2">{Math.round(value * 100)}%</span>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
+      <span aria-hidden style={{ color: s.color }} className="font-semibold">{s.icon}</span>
+      {s.label}
     </span>
   );
 }
 
-export const btn = {
-  primary:
-    "inline-flex items-center justify-center gap-2 rounded-lg bg-ink px-3.5 py-2 text-sm font-medium text-page transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40",
-  secondary:
-    "inline-flex items-center justify-center gap-2 rounded-lg bg-surface px-3.5 py-2 text-sm font-medium text-ink ring-1 ring-line transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40",
-  ghost:
-    "inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-2 transition hover:bg-surface-2 hover:text-ink disabled:opacity-40",
-};
+export function Chip({ children, title }: { children: ReactNode; title?: string }) {
+  return (
+    <span title={title} className="inline-flex items-center whitespace-nowrap rounded-lg border border-line bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
+      {children}
+    </span>
+  );
+}
 
-export const input =
-  "rounded-lg bg-surface px-3 py-2 text-sm text-ink ring-1 ring-line outline-none focus:ring-2 focus:ring-series";
+/** Λεπτή μπάρα 0..1 (π.χ. confidence) — μονόχρωμη, με το ποσοστό δίπλα σε text ink. */
+export function Meter({ value, label }: { value: number; label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-2" title={label}>
+      <span className="relative inline-block h-1.5 w-14 overflow-hidden rounded-full" style={{ background: "var(--series-1-wash)" }}>
+        <span className="grow-x absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.round(value * 100)}%`, background: "var(--series-1)" }} />
+      </span>
+      <span className="tnum text-xs text-ink-2">{Math.round(value * 100)}%</span>
+    </span>
+  );
+}
+
+export function Segmented<T extends string>({ value, onChange, options, label }: {
+  value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; label: string;
+}) {
+  return (
+    <div className="seg" role="group" aria-label={label}>
+      {options.map((o) => (
+        <button key={o.value} type="button" aria-pressed={value === o.value} onClick={() => onChange(o.value)}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+export function Select({ value, onChange, options, label }: {
+  value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; label: string;
+}) {
+  return (
+    <select className="field pr-8" value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+export function FilterBar({ children }: { children: ReactNode }) {
+  return <div className="fade-in mb-5 flex flex-wrap items-center gap-2">{children}</div>;
+}
+
+export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div className="card p-8 text-center">
+      <div className="text-base font-semibold text-ink">{title}</div>
+      {children && <div className="mx-auto mt-1.5 max-w-md text-sm text-ink-2">{children}</div>}
+    </div>
+  );
+}
+
+export function ErrorBox({ message }: { message: string }) {
+  return (
+    <div className="card p-4 text-sm text-ink-2" role="alert">
+      <strong className="text-ink">Δεν φορτώθηκαν τα δεδομένα.</strong> {message}
+      <div className="mt-1 text-ink-muted">
+        Τρέχει το App API; <code>./scripts/dev_backend.sh</code> (ή <code>python3 scripts/mock_app_api.py</code>)
+      </div>
+    </div>
+  );
+}
+
+export function Loading() {
+  return (
+    <div className="flex items-center justify-center gap-2 py-16 text-sm text-ink-muted" role="status">
+      <span className="pulse-dot inline-block h-2 w-2 rounded-full" style={{ background: "var(--series-1)" }} />
+      Φόρτωση…
+    </div>
+  );
+}

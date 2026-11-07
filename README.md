@@ -10,8 +10,8 @@
 
 | | Ρόλος |
 |---|---|
-| **Δημήτρης** | Data & backend: forecasting, submission, suggested orders, App API, LLM εξηγήσεις |
-| **Νίκος** | Dashboard & voice: Next.js dashboard, voice agent (Twilio + LLM) |
+| **Δημήτρης** | Data, backend & dashboard: forecasting, submission, suggested orders, App API, LLM εξηγήσεις, Next.js dashboard |
+| **Νίκος** | Voice agent (Twilio + LLM) |
 
 ➡️ **Ξεκίνα από το [`docs/PLAN.md`](docs/PLAN.md)** (σειρά υλοποίησης & checkboxes) και το [`docs/CONTRACTS.md`](docs/CONTRACTS.md).
 
@@ -30,7 +30,7 @@ Twilio ⇄ apps/voice (Node/TS) ──HTTP──▶ apps/api (FastAPI) ───
 | `team_pack/` | Επίσημο data pack + mock ERP (**μην το αλλάζετε**) | – | 8080 |
 | `services/forecast/` | Ingestion, cleaning, features, model, backtest, submission, suggestions | Δημήτρης | – |
 | `apps/api/` | App API: suggestions, quantity/confirm/create-draft, calls, audit | Δημήτρης | 8000 |
-| `apps/web/` | Dashboard | Νίκος | 3000 |
+| `apps/web/` | Dashboard (6 σελίδες, glass theme) | Δημήτρης | 3000 |
 | `apps/voice/` | Voice agent | Νίκος | 8100 |
 | `scripts/mock_app_api.py` | Mock του App API πάνω σε fixture — για ανάπτυξη χωρίς backend | Νίκος | 8000 |
 | `fixtures/` | Παραδείγματα JSON σύμφωνα με τα contracts | κοινό | – |
@@ -45,9 +45,8 @@ Twilio ⇄ apps/voice (Node/TS) ──HTTP──▶ apps/api (FastAPI) ───
 git clone <repo-url> && cd voicerestock-ai
 cp .env.example .env                     # συμπλήρωσε ό,τι χρειάζεσαι
 
-python3 team_pack/mock_erp_server.py     # terminal 1 — Mock ERP :8080
-python3 scripts/mock_app_api.py          # terminal 2 — Mock App API :8000 (μέχρι να έρθει το apps/api)
-curl "localhost:8000/api/suggestions?salesman=105"
+./scripts/dev_backend.sh                    # terminal 1 — forecast + Mock ERP :8080 + App API :8000
+cd apps/web && npm install && npm run dev   # terminal 2 — Dashboard http://localhost:3000
 ```
 
 Οδηγίες ανά κομμάτι: `services/forecast/README.md`, `apps/api/README.md`, `apps/web/README.md`, `apps/voice/README.md`.
