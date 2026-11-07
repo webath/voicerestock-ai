@@ -196,7 +196,9 @@ class MarketScanner:
         today = datetime.now().strftime("%d/%m/%Y")
         messages = [{"role": "user", "content": f"Σήμερα είναι {today}. Κάνε την εβδομαδιαία έρευνα αγοράς."}]
         tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": MAX_SEARCHES,
-                  "user_location": {"type": "approximate", "country": "GR", "city": "Athens", "timezone": "Europe/Athens"}}]
+                  # Χωρίς "country": το web search απορρίπτει το «GR» (400 «Country code GR is not supported»)·
+                  # η ελληνική αγορά ορίζεται από το RESEARCH_SYSTEM.
+                  "user_location": {"type": "approximate", "city": "Athens", "timezone": "Europe/Athens"}}]
         texts, sources, seen, searches, usage = [], [], {}, 0, {"input_tokens": 0, "output_tokens": 0}
         for _ in range(4):                                       # pause_turn → συνέχεια, ως 4 γύροι
             r = client.beta.messages.create(model=MODEL, max_tokens=16000, system=RESEARCH_SYSTEM, tools=tools,
