@@ -11,6 +11,8 @@ const NAV = [
   { href: "/orders", label: "Παραγγελίες" },
   { href: "/customers", label: "Πελάτες" },
   { href: "/voice", label: "Κλήσεις" },
+  { href: "/campaigns", label: "Campaigns" },
+  { href: "/market", label: "Market Scan" },
   { href: "/evaluation", label: "Αξιολόγηση" },
 ];
 

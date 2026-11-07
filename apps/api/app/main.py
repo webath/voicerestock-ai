@@ -22,8 +22,10 @@ from pydantic import BaseModel, StrictInt
 from . import assistant as ai
 from .activity import operations, trace
 from .agent import AgentRunner
+from .campaigns import Campaigns
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
+from .market import MarketScanner
 from .store import PROCESSED, ROOT, Store
 
 logging.basicConfig(level=logging.INFO)
@@ -75,7 +77,8 @@ class CallEvent(BaseModel):
     erp_draft_id: str | None = None
 
 
-def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent: AgentRunner | None = None) -> FastAPI:
+def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent: AgentRunner | None = None,
+               market: MarketScanner | None = None) -> FastAPI:
     app = FastAPI(title="VORA App API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.state.store = store or Store()
@@ -91,7 +94,7 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
 
     def after_agent(run: dict) -> dict:
         """Ο agent έγραψε νέα αρχεία → φρέσκα caches· νέες προτάσεις μόνο αν άλλαξαν."""
-        for f in (_forecasts, _daily, _customers, _salesman_names, _item_names):
+        for f in (_forecasts, _daily, _customers, _salesman_names, _item_names, _campaigns, _campaigns_report):
             f.cache_clear()
         app.state.ai_cache.clear()
         changed = S().reload_if_changed()
@@ -339,6 +342,24 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
             raise ApiError(409, "agent_running", "ο agent τρέχει ήδη")
         return run
 
+    # ---------------- Campaigns & Market Scan (Νίκος) ----------------
+    app.state.market = market or MarketScanner(lambda: _campaigns().internal_snapshot())
+
+    @app.get("/api/campaigns")
+    def campaigns():
+        return _campaigns_report()
+
+    @app.get("/api/market")
+    def market_state(scan: str | None = None):
+        return app.state.market.state(scan)
+
+    @app.post("/api/market/scan", status_code=202)
+    def market_scan():
+        run = app.state.market.start("manual")
+        if run is None:
+            raise ApiError(409, "scan_running", "η έρευνα αγοράς τρέχει ήδη")
+        return run
+
     @app.post("/api/admin/reset")
     def reset(x_actor: str = Header("unknown")):
         n = S().reset()
@@ -372,6 +393,19 @@ def _customer_out(c: dict) -> dict:
             "AREA": c["AREA"], "CITY": c["CITY"], "SALESMAN": int(c["SALESMAN"]),
             "SALESMAN_NAME": names.get(int(c["SALESMAN"])), "INSDATE": c["INSDATE"],
             "cold_start": c["INSDATE"] >= "2026-01-01"}
+
+
+@lru_cache
+def _campaigns() -> Campaigns:
+    data = ROOT / "team_pack" / "data"
+    csv = lambda name: pd.read_csv(data / name, encoding="utf-8-sig")  # noqa: E731
+    return Campaigns(_daily(), pd.read_parquet(PROCESSED / "lines_clean.parquet"), csv("MTRL.csv"), csv("TRDR.csv"),
+                     csv("PROMO.csv"), csv("greek_holidays.csv"), _salesman_names())
+
+
+@lru_cache
+def _campaigns_report() -> dict:
+    return _campaigns().report()
 
 
 @lru_cache

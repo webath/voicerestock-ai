@@ -114,7 +114,7 @@ def spoken_item(name: str) -> str:
         if v == 0.5:
             return "μισό λίτρο"
         return f"{w(round(v * 1000))} ml" if v < 1 else f"{w(m.group(1))} κόμμα {w(m.group(2))} λίτρα"
-    s = re.sub(r"(\d+),(\d+)\s*L\b", decimal_litres, s)
+    s = re.sub(r"(\d+)[,.](\d+)\s*L\b", decimal_litres, s)
     unit = lambda one, many: (lambda m: f"{w(m.group(1))} {one if m.group(1) == '1' else many}")  # noqa: E731
     s = re.sub(r"(\d+)\s*L\b", unit("λίτρο", "λίτρα"), s)
     s = re.sub(r"(\d+)\s*kg\b", unit("κιλό", "κιλά"), s)
@@ -156,10 +156,13 @@ def line_brief(line: dict) -> str:
     return f"{spoken_item(line['ITEM_NAME'])}: {ends}· πρόταση {qty_words(line['QTY1'], line['UNIT'])}"
 
 
-def value_phrase(s: dict) -> str:
-    """«, αξία περίπου … ευρώ σε τιμές καταλόγου» — μόνο αν τη δίνει το App API (πεδίο VALUE)."""
+def value_phrase(s: dict, list_prices: bool = True) -> str:
+    """«, αξία περίπου … ευρώ σε τιμές καταλόγου» — μόνο αν τη δίνει το App API (πεδίο VALUE).
+    Στην περίληψη χωρίς «σε τιμές καταλόγου»: ειπώθηκε ήδη στην πρώτη γραμμή και κάθε λέξη εκεί κοστίζει."""
     v = s.get("VALUE")
-    return f", αξία περίπου {euro_words(v)} σε τιμές καταλόγου" if isinstance(v, (int, float)) and v > 0 else ""
+    if not (isinstance(v, (int, float)) and v > 0):
+        return ""
+    return f", αξία περίπου {euro_words(v)}" + (" σε τιμές καταλόγου" if list_prices else "")
 
 
 def suggestion_brief(s: dict) -> str:
@@ -168,7 +171,29 @@ def suggestion_brief(s: dict) -> str:
             f"Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)}.")
 
 
-READ_BACK_FULL = 4   # μέχρι τόσα είδη διαβάζονται όλα· πάνω από αυτό η περίληψη θα κρατούσε μισό λεπτό
+def _first_out(s: dict) -> dict:
+    """Το είδος που τελειώνει πρώτο (αυτό λέγεται στην πρώτη ατάκα)."""
+    return min(s["LINES"], key=lambda l: l.get("PREDICTED_DEPLETION_DATE") or "9999")
+
+
+def opening_line(s: dict) -> str:
+    """ΜΙΑ σύντομη ατάκα ανά πελάτη (~8″): το πρώτο είδος που τελειώνει, πόσα ακόμα, αξία, παράδοση.
+    Στις πρώτες κλήσεις η πλήρης περιγραφή όλων των ειδών κρατούσε ~20″ και ο πωλητής διέκοπτε."""
+    l = _first_out(s)
+    rest = len(s["LINES"]) - 1
+    dep = l.get("PREDICTED_DEPLETION_DATE")
+    when = f" γύρω στις {spoken_day_month(dep)}" if dep else ""
+    more = "" if rest <= 0 else (", και ένα ακόμα είδος" if rest == 1 else f", και άλλα {num_words(rest)} είδη")
+    return (f"{spoken_customer(s['CUSTOMER_NAME'])}: τελειώνει πρώτα {spoken_item(l['ITEM_NAME'])}{when}{more}"
+            f"{value_phrase(s)}. Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}.")
+
+
+def items_list(s: dict) -> str:
+    """Όλα τα είδη με ποσότητα και εξάντληση — μόνο όταν ο πωλητής ρωτήσει «τι άλλο;»."""
+    return "· ".join(line_brief(l) for l in s["LINES"]) + "."
+
+
+READ_BACK_FULL = 3   # μέχρι τόσα είδη διαβάζονται όλα· πάνω από αυτό: τα αλλαγμένα + τα πρώτα, ως 2
 
 
 def read_back(s: dict) -> str:
@@ -181,13 +206,13 @@ def read_back(s: dict) -> str:
         items = ", ".join(say(l) for l in lines)
     else:
         changed = [l for l in lines if l["QTY1"] != l.get("QTY_RECOMMENDED", l["QTY1"])]
-        shown = changed + [l for l in lines if l not in changed][: max(0, 3 - len(changed))]
+        shown = changed + [l for l in lines if l not in changed][: max(0, 2 - len(changed))]
         rest = len(lines) - len(shown)
         items = ", ".join(say(l) for l in shown)
         if rest:
             items += f", και {'ένα ακόμα είδος' if rest == 1 else num_words(rest) + ' ακόμα είδη'} στις ποσότητες της πρότασης"
-    return (f"Επιβεβαιώνετε draft παραγγελίας για τον πελάτη {spoken_customer(s['CUSTOMER_NAME'])}: {items}, "
-            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)};")
+    return (f"Επιβεβαιώνετε πρόχειρη παραγγελία για τον πελάτη {spoken_customer(s['CUSTOMER_NAME'])}: {items}, "
+            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s, list_prices=False)};")
 
 
 def explain_line(line: dict) -> str:
@@ -260,10 +285,9 @@ def priority_sort_key(s: dict):
     return (PRIORITY_ORDER.get(priority_of(s)[0], 5), -(s.get("VALUE") or 0), first)
 
 
-PRIORITY_NOTE = {
-    "critical": "ΚΡΙΣΙΜΟ: έχει χάσει τον συνηθισμένο κύκλο αγορών του, πιθανότατα έχει ήδη ξεμείνει. ",
-    "lost": "ΠΙΘΑΝΗ ΑΠΩΛΕΙΑ: δεν αγοράζει εδώ και πολύ καιρό. Πρότεινε στον πωλητή να πάρει τον πελάτη τηλέφωνο· "
-            "μην πιέσεις για παραγγελία. ",
+PRIORITY_NOTE = {   # ετικέτες για τη βοηθό· λέγονται σε λίγες λέξεις, όχι αυτούσιες
+    "critical": "[ΚΡΙΣΙΜΟ — μάλλον έχει ήδη ξεμείνει] ",
+    "lost": "[ΠΙΘΑΝΗ ΑΠΩΛΕΙΑ — δεν αγοράζει εδώ και καιρό· πρότεινε τηλέφωνο στον πελάτη, όχι παραγγελία] ",
 }
 
 
@@ -426,6 +450,13 @@ class CallSession:
         return {"status": "ok", "count": len(open_),
                 "suggestions": [{"id": s["id"], "urgency": s["urgency"], "say": suggestion_brief(s)} for s in open_]}
 
+    async def list_items(self, suggestion_id: str) -> dict:
+        s = await self._fresh(suggestion_id)
+        if not s:
+            return self._err("Δεν βρέθηκε αυτή η πρόταση στους πελάτες σας.")
+        return {"status": "ok", "say": items_list(s),
+                "message": "Πες τα σύντομα· αν είναι πάνω από τέσσερα, πες τα τέσσερα πρώτα και ρώτα αν θέλει τα υπόλοιπα."}
+
     async def explain(self, suggestion_id: str) -> dict:
         s = await self._fresh(suggestion_id)
         if not s:
@@ -473,7 +504,7 @@ class CallSession:
         if not s:
             return self._err("Δεν βρέθηκε αυτή η πρόταση στους πελάτες σας.")
         if s["status"] == "draft_created":
-            return {"status": "already_created", "say": f"Γι' αυτόν τον πελάτη έχει ήδη δημιουργηθεί draft."}
+            return {"status": "already_created", "say": f"Γι' αυτόν τον πελάτη έχει ήδη δημιουργηθεί πρόχειρη παραγγελία."}
         if s["status"] not in OPEN_STATUSES:
             return self._err(f"Η πρόταση δεν μπορεί να γίνει παραγγελία (κατάσταση {s['status']}).")
         self.pending[suggestion_id] = s["version"]
@@ -490,7 +521,7 @@ class CallSession:
         """Βήμα 2/2: μετά από ρητό «ναι» στην περίληψη → confirm + create-draft, exactly-once."""
         if suggestion_id in self.drafts:
             return {"status": "draft_created", "erp_draft_id": self.drafts[suggestion_id],
-                    "say": "Το draft έχει ήδη δημιουργηθεί."}
+                    "say": "Η πρόχειρη παραγγελία έχει ήδη δημιουργηθεί."}
         version = self.pending.get(suggestion_id)
         if version is None:
             return self._err("Δεν έχει διαβαστεί περίληψη για επιβεβαίωση. Κάλεσε πρώτα prepare_order.")
@@ -509,7 +540,7 @@ class CallSession:
             await self.event(type="confirmation", role="user", suggestion_id=suggestion_id, text=self.user_text)
         code, conf = await self.req("POST", f"/api/suggestions/{suggestion_id}/confirm", {"version": version})
         if code != 200 or not conf.get("confirmation_token"):
-            return self._err("Η επιβεβαίωση απέτυχε στο σύστημα. Δεν δημιουργήθηκε draft.")
+            return self._err("Η επιβεβαίωση απέτυχε στο σύστημα. Δεν δημιουργήθηκε πρόχειρη παραγγελία.")
         await self.set_status("posting_draft", suggestion_id=suggestion_id)
         key = f"{self.call_id}:{suggestion_id}:v{version}"
         code, out = await self.req("POST", f"/api/suggestions/{suggestion_id}/create-draft",
@@ -521,7 +552,7 @@ class CallSession:
             await self.set_status("draft_created", suggestion_id=suggestion_id, erp_draft_id=did)
             tail = spoken_digits(did.split("-")[-1])
             return {"status": "draft_created", "erp_draft_id": did,
-                    "say": f"Το ERP δημιούργησε το draft. Ο κωδικός τελειώνει σε {tail} και φαίνεται στο dashboard."}
+                    "say": f"Το ERP δημιούργησε την πρόχειρη παραγγελία. Ο κωδικός τελειώνει σε {tail} και φαίνεται στο dashboard."}
         await self.set_status("discussing", suggestion_id=suggestion_id)
-        return self._err("Το ERP δεν επιβεβαίωσε τη δημιουργία draft. ΔΕΝ δημιουργήθηκε παραγγελία· "
+        return self._err("Το ERP δεν επιβεβαίωσε τη δημιουργία πρόχειρης παραγγελίας. ΔΕΝ δημιουργήθηκε παραγγελία· "
                          "ο πωλητής μπορεί να το δει στο dashboard.", http=code)
