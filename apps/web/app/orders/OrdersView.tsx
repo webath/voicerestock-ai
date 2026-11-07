@@ -3,8 +3,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
-  EmptyState, ErrorBox, FilterBar, Loading, Meter, PageHeader, Segmented, Select, StatusBadge, UrgencyBadge,
+  EmptyState, ErrorBox, FilterBar, Loading, Meter, PageHeader, PriorityBadge, Segmented, Select, StatusBadge,
 } from "@/components/ui";
+import { byPriority, priorityOf, priorityReason, type Priority } from "@/lib/priority";
 import { ApiError, apiPost, useApi, type Salesman, type Suggestion } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { fmtDay, fmtDayLong, fmtEur, fmtEur2, fmtNum } from "@/lib/format";
@@ -19,6 +20,7 @@ export function OrdersView() {
   const [tab, setTab] = useState<Tab>("todo");
   const [salesman, setSalesman] = useState("");
   const [q, setQ] = useState("");
+  const [level, setLevel] = useState<"" | Priority>("");
   // Τοπικές ενημερώσεις (απαντήσεις του API) πάνω από τη λίστα — χωρίς refetch όλων.
   const [local, setLocal] = useState<Record<string, Suggestion>>({});
   const openId = params.get("open");
@@ -31,8 +33,11 @@ export function OrdersView() {
   const rows = list.filter((s) => s.id === openId ||
     (tab === "all" || (tab === "todo" ? TODO.includes(s.status) : s.status === "draft_created"))
     && (!salesman || String(s.SALESMAN) === salesman)
+    && (!level || priorityOf(s).priority === level)
     && (!needle || `${s.CUSTOMER_NAME} ${s.LINES.map((l) => l.ITEM_NAME).join(" ")}`.toLowerCase().includes(needle)))
-    .sort((a, b) => Number(b.id === openId) - Number(a.id === openId));   // η παραγγελία από link πρώτη
+    // η παραγγελία από link πρώτη· μετά κρίσιμες → επείγουσες → πιθανή απώλεια → …, μέσα σε κάθε επίπεδο κατά αξία
+    .sort((a, b) => Number(b.id === openId) - Number(a.id === openId) || byPriority(a, b));
+  const levelCount = (p: Priority) => list.filter((s) => TODO.includes(s.status) && priorityOf(s).priority === p).length;
   const counts = {
     todo: list.filter((s) => TODO.includes(s.status)).length,
     done: list.filter((s) => s.status === "draft_created").length,
@@ -48,6 +53,10 @@ export function OrdersView() {
           options={[{ value: "todo", label: `Προς έγκριση · ${counts.todo}` }, { value: "done", label: `Στο ERP · ${counts.done}` }, { value: "all", label: "Όλες" }]} />
         <Select label="Πωλητής" value={salesman} onChange={setSalesman}
           options={[{ value: "", label: "Όλοι οι πωλητές" }, ...(salesmen.data ?? []).map((s) => ({ value: String(s.PRSN), label: s.NAME }))]} />
+        <Select label="Προτεραιότητα" value={level} onChange={(v) => setLevel(v as "" | Priority)}
+          options={[{ value: "", label: "Όλα τα επίπεδα" }, { value: "critical", label: `▲ Κρίσιμο · ${levelCount("critical")}` },
+            { value: "high", label: `● Επείγον · ${levelCount("high")}` }, { value: "lost", label: `? Πιθανή απώλεια · ${levelCount("lost")}` },
+            { value: "medium", label: `◐ Σύντομα · ${levelCount("medium")}` }]} />
         <input type="search" className="field w-60 max-w-full" placeholder="Πελάτης ή είδος" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Αναζήτηση" />
       </FilterBar>
 
@@ -110,6 +119,8 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
       text: `${s.CUSTOMER_NAME} · ${c.snapshot.LINES.length} είδη · ${fmtEur(c.snapshot.VALUE)} · παράδοση ${fmtDayLong(s.SUGGESTED_DELIVERY_DATE)}` });
   });
 
+  const pr = priorityOf(s);
+  const why = priorityReason(pr);
   const cancel = () => run("cancel", async () => onChange(await apiPost<Suggestion>(`/api/suggestions/${s.id}/cancel`)));
 
   return (
@@ -118,7 +129,7 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
         className="flex w-full flex-wrap items-center gap-x-5 gap-y-2 px-5 py-4 text-left">
         <span className="min-w-0 basis-full sm:basis-0 sm:flex-1">
           <span className="block truncate font-semibold text-ink">{s.CUSTOMER_NAME}</span>
-          <span className="block truncate text-xs text-ink-muted">{s.REASON}</span>
+          <span className="block truncate text-xs text-ink-muted">{why ?? s.REASON}</span>
         </span>
         <span className="text-right">
           <span className="block text-sm font-semibold text-ink tnum">{fmtDayLong(s.SUGGESTED_DELIVERY_DATE)}</span>
@@ -128,7 +139,7 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
           <span className="block text-sm font-semibold text-ink tnum">{fmtNum(s.LINES.length)} είδη</span>
           <span className="block text-xs text-ink-muted tnum">{fmtNum(units)} μον. · {fmtEur(s.VALUE)}</span>
         </span>
-        <span className="flex flex-1 justify-end gap-2 sm:w-56 sm:flex-none"><UrgencyBadge urgency={s.urgency} /><StatusBadge status={s.status} /></span>
+        <span className="flex flex-1 justify-end gap-2 sm:w-64 sm:flex-none"><PriorityBadge info={pr} reason={why} /><StatusBadge status={s.status} /></span>
         <span aria-hidden className="text-ink-muted transition-transform duration-300" style={{ transform: open ? "rotate(180deg)" : "none" }}>⌄</span>
       </button>
 

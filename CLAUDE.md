@@ -2,7 +2,7 @@
 
 ## Τι είναι αυτό το project
 
-**VoiceRestock AI** — λύση για το Revival Challenge #5 (ΕΚΠΑ hackathon, 6–8/11/2026, παρουσίαση **Κυριακή 8/11 15:00**).
+**VORA — Voice Ordering & Restock Assistant** (πρώην «VoiceRestock AI»· repo `voicerestock-ai`) — λύση για το Revival Challenge #5 (ΕΚΠΑ hackathon, 6–8/11/2026, παρουσίαση **Κυριακή 8/11 15:00**).
 Από τιμολόγια ERP (SoftOne schema) προβλέπουμε πότε κάθε πελάτης θα ξεμείνει από κάθε είδος, φτιάχνουμε Suggested Orders
 ως drafts στο ERP, τα δείχνουμε σε dashboard «At Risk», και ένας ελληνόφωνος voice agent καλεί τον πωλητή για να τα επιβεβαιώσει.
 
