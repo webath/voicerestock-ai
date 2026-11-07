@@ -33,9 +33,12 @@ UNITS = {"ΚΙΒ": ("κιβώτιο", "κιβώτια"), "ΤΕΜ": ("τεμάχ�
 
 
 def num_words(n: int, feminine: bool = False) -> str:
-    """Ακέραιος 0..1999 σε λέξεις (ουδέτερο, ή θηλυκό για ημέρες του μήνα). Μεγαλύτεροι μένουν ψηφία."""
-    if n < 0 or n >= 2000:
+    """Ακέραιος 0..999.999 σε λέξεις (ουδέτερο, ή θηλυκό για ημέρες/χιλιάδες). Μεγαλύτεροι μένουν ψηφία."""
+    if n < 0 or n >= 1_000_000:
         return str(n)
+    if n >= 2000:
+        th, rest = divmod(n, 1000)
+        return f"{num_words(th, feminine=True)} χιλιάδες" + (f" {num_words(rest, feminine)}" if rest else "")
     if n >= 1000:
         rest = n - 1000
         return "χίλια" + (f" {num_words(rest, feminine)}" if rest else "")
@@ -76,6 +79,11 @@ def spoken_day_month(iso: str) -> str:
 def spoken_date(iso: str) -> str:
     """2026-11-03 → «την Τρίτη τρεις Νοεμβρίου»."""
     return f"{WEEKDAYS_ACC[_d(iso).weekday()]} {spoken_day_month(iso)}"
+
+
+def euro_words(v) -> str:
+    """1275.6 → «χίλια διακόσια εβδομήντα έξι ευρώ» (στρογγυλό ευρώ· τιμές καταλόγου, όχι τελική τιμή)."""
+    return f"{num_words(int(round(float(v))))} ευρώ"
 
 
 def spoken_digits(s: str) -> str:
@@ -145,17 +153,38 @@ def line_brief(line: dict) -> str:
     return f"{spoken_item(line['ITEM_NAME'])}: {ends}· πρόταση {qty_words(line['QTY1'], line['UNIT'])}"
 
 
+def value_phrase(s: dict) -> str:
+    """«, αξία περίπου … ευρώ σε τιμές καταλόγου» — μόνο αν τη δίνει το App API (πεδίο VALUE)."""
+    v = s.get("VALUE")
+    return f", αξία περίπου {euro_words(v)} σε τιμές καταλόγου" if isinstance(v, (int, float)) and v > 0 else ""
+
+
 def suggestion_brief(s: dict) -> str:
     lines = "· ".join(line_brief(l) for l in s["LINES"])
     return (f"{spoken_customer(s['CUSTOMER_NAME'])} ({s['AREA']}): {lines}. "
-            f"Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}.")
+            f"Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)}.")
+
+
+READ_BACK_FULL = 4   # μέχρι τόσα είδη διαβάζονται όλα· πάνω από αυτό η περίληψη θα κρατούσε μισό λεπτό
 
 
 def read_back(s: dict) -> str:
-    """Η ΑΚΡΙΒΗΣ περίληψη που ακούει ο πωλητής πριν από την επιβεβαίωση."""
-    items = ", ".join(f"{spoken_item(l['ITEM_NAME'])} {qty_words(l['QTY1'], l['UNIT'])}" for l in s["LINES"])
+    """Η περίληψη που επιβεβαιώνει ο πωλητής. Λέει ΠΑΝΤΑ: πελάτη, κάθε είδος που άλλαξε ο πωλητής, παράδοση.
+    Σε μεγάλη πρόταση τα υπόλοιπα είδη λέγονται ως «στις ποσότητες της πρότασης» (ίδια με το dashboard),
+    αλλιώς η κλήση κρατά μισό λεπτό και ο πωλητής διακόπτει (πρώτη κλήση με πραγματικά δεδομένα, 7/11)."""
+    lines = s["LINES"]
+    say = lambda l: f"{spoken_item(l['ITEM_NAME'])} {qty_words(l['QTY1'], l['UNIT'])}"  # noqa: E731
+    if len(lines) <= READ_BACK_FULL:
+        items = ", ".join(say(l) for l in lines)
+    else:
+        changed = [l for l in lines if l["QTY1"] != l.get("QTY_RECOMMENDED", l["QTY1"])]
+        shown = changed + [l for l in lines if l not in changed][: max(0, 3 - len(changed))]
+        rest = len(lines) - len(shown)
+        items = ", ".join(say(l) for l in shown)
+        if rest:
+            items += f", και {'ένα ακόμα είδος' if rest == 1 else num_words(rest) + ' ακόμα είδη'} στις ποσότητες της πρότασης"
     return (f"Επιβεβαιώνετε draft παραγγελίας για τον πελάτη {spoken_customer(s['CUSTOMER_NAME'])}: {items}, "
-            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])};")
+            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)};")
 
 
 def explain_line(line: dict) -> str:
@@ -350,7 +379,8 @@ class CallSession:
         self.sugs[suggestion_id] = out
         self.pending.pop(suggestion_id, None)    # ό,τι είχε διαβαστεί πριν δεν ισχύει πια
         await self.event(type="status", status="discussing", suggestion_id=suggestion_id)
-        return {"status": "ok", "say": f"{spoken_item(line['ITEM_NAME'])}: η ποσότητα έγινε {qty_words(qty, line['UNIT'])}."}
+        return {"status": "ok", "say": f"{spoken_item(line['ITEM_NAME'])}: η ποσότητα έγινε {qty_words(qty, line['UNIT'])}"
+                                       f"{value_phrase(out).replace(', αξία', '· νέα αξία της παραγγελίας')}."}
 
     async def prepare_order(self, suggestion_id: str) -> dict:
         """Βήμα 1/2: ο πωλητής ζήτησε παραγγελία → διαβάζεται η ακριβής περίληψη. ΚΑΝΕΝΑ write ακόμα."""
