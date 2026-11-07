@@ -20,6 +20,7 @@ import math
 import os
 import re
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Callable
@@ -248,16 +249,48 @@ class ApifonError(Exception):
 
 
 class Apifon:
+    """Δύο τρόποι σύνδεσης (docs.apifon.com/authentication):
+    - oauth: APIFON_TOKEN = client id, APIFON_SECRET = client secret → Bearer token (ισχύει μία μέρα, κρατιέται στη μνήμη).
+    - hmac:  APIFON_TOKEN = ApifonWS token, APIFON_SECRET = secret access key → υπογραφή σε κάθε αίτημα.
+    APIFON_AUTH=auto (default): δοκιμάζει oauth· αν το Apifon δεν αναγνωρίσει τον client, πέφτει σε hmac."""
     BASE = "https://ars.apifon.com"
     PATH = "/services/api/v1/sms/send"
+    TOKEN_URL = "https://ids.apifon.com/oauth2/token"
 
     def __init__(self, token: str | None = None, secret: str | None = None, sender: str | None = None,
-                 post: Callable | None = None, base: str | None = None):
+                 post: Callable | None = None, base: str | None = None, auth: str | None = None,
+                 token_post: Callable | None = None):
         self.token = token if token is not None else os.environ.get("APIFON_TOKEN", "")
         self.secret = secret if secret is not None else os.environ.get("APIFON_SECRET", "")
         self.sender = (sender if sender is not None else os.environ.get("APIFON_SENDER", "")) or "VORA"
         self.base = base or os.environ.get("APIFON_BASE_URL", self.BASE)
+        self.auth = (auth or os.environ.get("APIFON_AUTH", "auto")).lower()
         self.post = post or (lambda url, content, headers: httpx.post(url, content=content, headers=headers, timeout=15))
+        self.token_post = token_post or (lambda url, data: httpx.post(url, data=data, timeout=15))
+        self._bearer: tuple[str, float] | None = None
+        self._lock = threading.Lock()
+
+    def _access_token(self, refresh: bool = False) -> str | None:
+        """Bearer token για oauth· None αν ο λογαριασμός είναι hmac (auto → μαθαίνει μία φορά)."""
+        if self.auth == "hmac":
+            return None
+        with self._lock:
+            if self._bearer and not refresh and self._bearer[1] > time.time():
+                return self._bearer[0]
+            try:
+                r = self.token_post(self.TOKEN_URL, {"grant_type": "client_credentials", "client_id": self.token,
+                                                     "client_secret": self.secret, "scope": "smsGateway"})
+            except httpx.HTTPError as e:
+                raise ApifonError(f"Δεν υπάρχει σύνδεση με το Apifon ({type(e).__name__}).") from e
+            if r.status_code == 200:
+                data = r.json()
+                self._bearer = (data["access_token"], time.time() + int(data.get("expires_in", 3600)) - 300)
+                self.auth = "oauth"
+                return self._bearer[0]
+            if self.auth == "auto" and r.status_code in (400, 401):
+                self.auth = "hmac"                                  # δεν είναι oauth client → υπογραφή
+                return None
+            raise ApifonError(f"Το Apifon δεν έδωσε πρόσβαση (OAuth HTTP {r.status_code}) — έλεγξε APIFON_TOKEN/APIFON_SECRET.")
 
     @property
     def configured(self) -> bool:
@@ -268,25 +301,35 @@ class Apifon:
         mac = hmac.new(self.secret.encode("utf-8"), to_sign.encode("utf-8"), hashlib.sha256).digest()
         return base64.b64encode(mac).decode()
 
+    def _post(self, body: str, refresh: bool = False):
+        bearer = self._access_token(refresh)
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+        else:
+            date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+            headers.update({"X-ApifonWS-Date": date, "Authorization": f"ApifonWS {self.token}:{self.sign(body, date)}"})
+        try:
+            return self.post(self.base + self.PATH, body.encode("utf-8"), headers)
+        except httpx.HTTPError as e:
+            raise ApifonError(f"Δεν υπάρχει σύνδεση με το Apifon ({type(e).__name__}).") from e
+
     def send(self, number: str, text: str, reference: str) -> dict:
         if not self.configured:
             raise ApifonError("Λείπουν τα στοιχεία Apifon (APIFON_TOKEN, APIFON_SECRET στο .env).")
         body = json.dumps({"subscribers": [{"number": number}], "reference_id": reference[:255],
                            "message": {"text": text, "dc": 2, "sender_id": self.sender[:11]}}, ensure_ascii=False)
-        date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
-        headers = {"Content-Type": "application/json; charset=utf-8", "X-ApifonWS-Date": date,
-                   "Authorization": f"ApifonWS {self.token}:{self.sign(body, date)}"}
-        try:
-            r = self.post(self.base + self.PATH, body.encode("utf-8"), headers)
-        except httpx.HTTPError as e:
-            raise ApifonError(f"Δεν υπάρχει σύνδεση με το Apifon ({type(e).__name__}).") from e
+        r = self._post(body)
+        if r.status_code == 401 and self.auth == "oauth":            # έληξε το token → μία φορά καινούργιο
+            r = self._post(body, refresh=True)
         try:
             data = r.json()
         except ValueError:
             data = {}
         info = data.get("result_info") or {}
         if r.status_code >= 400 or str(info.get("status_code", "200")) != "200":
-            title = data.get("title") or info.get("description") or f"HTTP {r.status_code}"
+            title = (data.get("title") or info.get("description") or
+                     ("τα στοιχεία σύνδεσης δεν έγιναν δεκτά (HTTP 401)" if r.status_code == 401 else f"HTTP {r.status_code}"))
             raise ApifonError(f"Το Apifon απέρριψε το SMS: {title}")
         res = (data.get("results") or {}).get(number) or [{}]
         return {"request_id": data.get("request_id"), "message_id": res[0].get("message_id")}
