@@ -146,3 +146,14 @@ def test_new_forecast_run_reloads_proposals(tmp_path):
     seed.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     fresh = Store(tmp_path / "s.sqlite", seed)                                     # νέο seed → reload
     assert fresh.get(sid)["status"] == "proposed"
+
+
+def test_idempotency_key_is_scoped_to_suggestion(env):
+    c, erp, _ = env
+    a, b = [s["id"] for s in c.get("/api/suggestions").json()[:2]]
+    for sid in (a, b):
+        tok = c.post(f"/api/suggestions/{sid}/confirm", json={"version": 1}).json()["confirmation_token"]
+        r = c.post(f"/api/suggestions/{sid}/create-draft", json={"confirmation_token": tok, "idempotency_key": "same-key"})
+        assert r.status_code == 200
+    assert len(erp.calls) == 2                                   # δύο διαφορετικά drafts
+    assert c.get(f"/api/suggestions/{a}").json()["erp_draft_id"] != c.get(f"/api/suggestions/{b}").json()["erp_draft_id"]
