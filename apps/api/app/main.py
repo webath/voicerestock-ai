@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import uuid
 from functools import lru_cache
 
@@ -25,6 +26,7 @@ from .campaigns import Campaigns
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
 from .market import MarketScanner
+from . import outreach
 from .store import PROCESSED, ROOT, Store
 
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +67,29 @@ class MessageBody(BaseModel):
     channel: str = "sms"
 
 
+class PriceEdit(BaseModel):
+    change_pct: float | None = None     # π.χ. 0.04 = +4%, -0.1 = −10%· None = πίσω στην πρόταση
+    status: str = "approved"            # approved | draft
+
+
+class DiscountEdit(BaseModel):
+    event: str
+    mtrl: int
+    disc: float | None = None           # % έκπτωση· None = πίσω στην πρόταση
+
+
+class SmsTarget(BaseModel):
+    kind: str                           # seasonal | price_promo | winback
+    trdr: int
+    mtrl: int | None = None
+    event: str | None = None
+
+
+class SmsSend(SmsTarget):
+    text: str
+    idempotency_key: str
+
+
 class CallEvent(BaseModel):
     call_sid: str
     type: str | None = None
@@ -77,7 +102,8 @@ class CallEvent(BaseModel):
 
 
 def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent: AgentRunner | None = None,
-               market: MarketScanner | None = None) -> FastAPI:
+               market: MarketScanner | None = None, campaign_state: outreach.CampaignState | None = None,
+               sms: outreach.Apifon | None = None) -> FastAPI:
     app = FastAPI(title="VORA App API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.state.store = store or Store()
@@ -333,9 +359,97 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
     # ---------------- Campaigns & Market Scan (Νίκος) ----------------
     app.state.market = market or MarketScanner(lambda: _campaigns().internal_snapshot())
 
+    app.state.campaign_state = campaign_state or outreach.CampaignState()
+    app.state.sms = sms or outreach.Apifon()
+    app.state.sms_lock = threading.Lock()
+    CS = lambda: app.state.campaign_state  # noqa: E731
+
+    def campaigns_view() -> dict:
+        return CS().apply(_campaigns_report())
+
     @app.get("/api/campaigns")
     def campaigns():
-        return _campaigns_report()
+        r = campaigns_view()
+        demo = os.environ.get("SMS_DEMO_TO", "").strip()
+        r["sms"] = {"configured": app.state.sms.configured, "sender": app.state.sms.sender,
+                    "demo_to": outreach.mask(outreach._digits(demo)) if demo else None}
+        return r
+
+    @app.put("/api/campaigns/prices/{mtrl}")
+    def edit_price(mtrl: int, body: PriceEdit, x_actor: str = Header("unknown")):
+        if not any(p["MTRL"] == mtrl for p in _campaigns_report()["pricing"]):
+            raise ApiError(404, "not_found", "δεν υπάρχει πρόταση τιμής για αυτό το είδος")
+        if body.status not in ("approved", "draft"):
+            raise ApiError(400, "bad_request", "status: approved ή draft")
+        if body.change_pct is not None and not -outreach.PRICE_LIMIT <= body.change_pct <= outreach.PRICE_LIMIT:
+            raise ApiError(400, "out_of_bounds", "η αλλαγή τιμής πρέπει να είναι από −30% ως +30%")
+        rec = CS().set_price(mtrl, body.change_pct, body.status, x_actor)
+        S().audit(x_actor, "price_change", None, f"{mtrl}: {'επαναφορά' if rec is None else f'{body.change_pct:+.1%} ({body.status})'}")
+        return next(p for p in campaigns_view()["pricing"] if p["MTRL"] == mtrl)
+
+    @app.put("/api/campaigns/discounts")
+    def edit_discount(body: DiscountEdit, x_actor: str = Header("unknown")):
+        ev = next((e for e in _campaigns_report()["seasonal"] if e["event"] == body.event), None)
+        if not ev or not any(i["MTRL"] == body.mtrl for i in ev["items"]):
+            raise ApiError(404, "not_found", "δεν υπάρχει αυτή η εποχική πρόταση")
+        if body.disc is not None and not 0 < body.disc <= outreach.DISC_LIMIT:
+            raise ApiError(400, "out_of_bounds", "η έκπτωση πρέπει να είναι από 0% ως 50%")
+        rec = CS().set_discount(body.event, body.mtrl, body.disc, x_actor)
+        S().audit(x_actor, "promo_discount", None, f"{body.event}/{body.mtrl}: {'επαναφορά' if rec is None else f'-{body.disc:g}%'}")
+        return next(i for e in campaigns_view()["seasonal"] if e["event"] == body.event for i in e["items"] if i["MTRL"] == body.mtrl)
+
+    def sms_facts(t: SmsTarget) -> dict:
+        try:
+            return outreach.facts_for(t.kind, campaigns_view(), t.trdr, t.mtrl, t.event)
+        except StopIteration:
+            raise ApiError(404, "not_found", "ο πελάτης δεν είναι στόχος αυτής της πρότασης")
+        except ValueError as e:
+            raise ApiError(400, "bad_request", str(e))
+
+    def sms_route(trdr: int) -> dict:
+        number, source = outreach.phone_for(trdr)
+        reason = (None if number and app.state.sms.configured else
+                  "Λείπουν τα στοιχεία Apifon (APIFON_TOKEN, APIFON_SECRET)." if number else
+                  f"Δεν υπάρχει κινητό για τον πελάτη — CUSTOMER_{trdr}_PHONE ή SMS_DEMO_TO στο .env.")
+        return {"number": number, "to": outreach.mask(number), "phone_source": source, "can_send": reason is None, "reason": reason}
+
+    @app.post("/api/campaigns/sms/draft")
+    def sms_draft(body: SmsTarget):
+        facts = sms_facts(body)
+        text, source = outreach.generate(facts)
+        route = sms_route(body.trdr)
+        route.pop("number")
+        return {"text": text, "source": source, "segments": outreach.segments(text), **route}
+
+    @app.post("/api/campaigns/sms/send")
+    def sms_send(body: SmsSend, x_actor: str = Header("unknown")):
+        text = " ".join(body.text.split())
+        if not text or outreach.segments(text) > outreach.MAX_SEGMENTS:
+            raise ApiError(400, "bad_request", "το SMS πρέπει να έχει κείμενο και να χωρά σε 3 μηνύματα (201 χαρακτήρες)")
+        sms_facts(body)                                         # μόνο σε πελάτη-στόχο της πρότασης
+        route = sms_route(body.trdr)
+        if not route["can_send"]:
+            raise ApiError(400, "cannot_send", route["reason"])
+        with app.state.sms_lock:                                # ένα πάτημα = ένα SMS
+            prev = CS().sms_by_key(body.idempotency_key)
+            if prev:
+                return prev
+            rec = outreach.new_sms_record(body.kind, body.trdr, body.mtrl, body.event, route["number"], route["phone_source"],
+                                          text, x_actor, body.idempotency_key)
+            CS().add_sms(rec)
+        try:
+            rec.update(status="sent", **app.state.sms.send(route["number"], text, rec["id"]))
+        except outreach.ApifonError as e:
+            rec.update(status="failed", error=str(e))
+        CS().save()
+        S().audit(x_actor, f"sms {body.kind}", None, f"{body.trdr} → {rec['to']}: {rec['status']}")
+        if rec["status"] == "failed":
+            return JSONResponse({"error": "sms_failed", "message": rec["error"], "sms": rec}, status_code=502)
+        return rec
+
+    @app.get("/api/campaigns/sms")
+    def sms_log():
+        return CS().data["sms"]
 
     @app.get("/api/market")
     def market_state(scan: str | None = None):

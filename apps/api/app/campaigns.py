@@ -114,6 +114,12 @@ class Campaigns:
         return {"TRDR": int(trdr), "CUSTOMER_NAME": c["NAME"], "CUSTOMER_CATEGORY": c["TRDCATEGORY"], "AREA": c["AREA"],
                 "CITY": c["CITY"], "SALESMAN": int(c["SALESMAN"]), "SALESMAN_NAME": self.salesmen.get(int(c["SALESMAN"]))}
 
+    def _buyers(self, mtrl: int, days: int = 180, n: int = 8) -> list[dict]:
+        """Οι πελάτες που παίρνουν το είδος τους τελευταίους μήνες (όσοι θα δουν την προσφορά/αλλαγή τιμής)."""
+        d = _sum(self.daily, self.cutoff - timedelta(days=days), self.cutoff)
+        q = d[d["MTRL"] == mtrl].groupby("TRDR")["qty"].sum().sort_values(ascending=False).head(n)
+        return [{**self._customer(int(t)), "past_qty": int(v)} for t, v in q.items() if v > 0]
+
     def _active(self, days: int = 60) -> set[int]:
         return set(_sum(self.daily, self.cutoff - timedelta(days=days), self.cutoff)["TRDR"].unique())
 
@@ -251,6 +257,8 @@ class Campaigns:
                 out.append({**base, "action": "review", "change_pct": None,
                             "why": f"Η ζήτηση μένει πίσω ({pct_text(yoy)}, ο κατάλογος {pct_text(typical)}) χωρίς να βοηθούν οι προσφορές — έλεγξε τιμή ανταγωνισμού "
                                    f"(καρτέλα Market Scan) πριν από έκπτωση."})
+        for row in out:
+            row["targets"] = self._buyers(row["MTRL"])
         order = {"increase": 0, "promo": 1, "review": 2}
         return sorted(out, key=lambda r: (order[r["action"]], -abs(r["yoy"] - typical)))
 
