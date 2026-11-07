@@ -51,15 +51,30 @@ def bundle(s: dict) -> dict:
             "SUGGESTED_DELIVERY_DATE": s["SUGGESTED_DELIVERY_DATE"], "lines_total": len(s["LINES"]), "lines": lines}
 
 
+MONTHS = ["Ιανουαρίου", "Φεβρουαρίου", "Μαρτίου", "Απριλίου", "Μαΐου", "Ιουνίου", "Ιουλίου",
+          "Αυγούστου", "Σεπτεμβρίου", "Οκτωβρίου", "Νοεμβρίου", "Δεκεμβρίου"]
+
+
+def gr_date(iso: str | None) -> str:
+    if not iso:
+        return "–"
+    y, m, d = iso.split("-")
+    return f"{int(d)} {MONTHS[int(m) - 1]}"
+
+
+def gr_num(v: float, digits: int = 1) -> str:
+    return f"{v:.{digits}f}".replace(".", ",")
+
+
 def template(s: dict) -> str:
     l = s["LINES"][0]; e = l["evidence"]
-    t = (f"Για τον πελάτη {s['CUSTOMER_NAME']}, το {l['ITEM_NAME']} εκτιμάται ότι τελειώνει στις {l['PREDICTED_DEPLETION_DATE']}: "
-         f"η τελευταία παραλαβή ήταν {e['last_purchase_qty']} {l['UNIT']} στις {e['last_purchase_date']} "
-         f"και καταναλώνει περίπου {e['burn_rate_per_day']:.1f} {l['UNIT']} τη μέρα.")
+    t = (f"Για τον πελάτη {s['CUSTOMER_NAME']}, το {l['ITEM_NAME']} εκτιμάται ότι τελειώνει στις {gr_date(l['PREDICTED_DEPLETION_DATE'])}: "
+         f"η τελευταία παραλαβή ήταν {e['last_purchase_qty']} {l['UNIT']} στις {gr_date(e['last_purchase_date'])} "
+         f"και καταναλώνει περίπου {gr_num(e['burn_rate_per_day'])} {l['UNIT']} τη μέρα.")
     if e.get("avg_interval_days"):
         t += f" Συνήθως παραγγέλνει κάθε {e['avg_interval_days']:.0f} μέρες."
     if e.get("promo"):
-        t += f" Ισχύει {e['promo']['name']} ({e['promo']['from']} – {e['promo']['to']})."
+        t += f" Ισχύει {e['promo']['name']} ({gr_date(e['promo']['from'])} – {gr_date(e['promo']['to'])})."
     if e.get("cold_start"):
         t += f" Νέος πελάτης: η πρόβλεψη στηρίζεται και σε παρόμοιους ({e.get('peer_group')})."
     if len(s["LINES"]) > 1:

@@ -46,9 +46,18 @@ def load_history():
 
 
 ITEMS, HISTORY = load_history()
+CUSTOMERS = {int(r['TRDR']): r for r in _rd('TRDR.csv')}
 SALESMEN = {int(r['PRSN']): r['NAME'] for r in _rd('PRSN.csv')}
 # «Σήμερα» του σεναρίου (README: «Σήμερα είναι 1/11/2026»). Από εδώ μετράει το days_left του /api/risk.
 TODAY = os.environ.get('SCENARIO_TODAY', '2026-11-01')
+
+
+def customer_out(r):
+    return {'TRDR': int(r['TRDR']), 'CODE': r['CODE'], 'NAME': r['NAME'], 'TRDCATEGORY': r['TRDCATEGORY'], 'AREA': r['AREA'],
+            'CITY': r['CITY'], 'SALESMAN': int(r['SALESMAN']), 'SALESMAN_NAME': SALESMEN.get(int(r['SALESMAN'])),
+            'INSDATE': r['INSDATE'], 'cold_start': r['INSDATE'] >= '2026-01-01'}
+
+
 TARGETS = {}
 for r in _rd('prediction_targets.csv'): TARGETS.setdefault(int(r['TRDR']), []).append(int(r['MTRL']))
 
@@ -153,6 +162,11 @@ class H(BaseHTTPRequestHandler):
                              # contract: «none» = καμία εξάντληση σε 90 μέρες (στο mock: ό,τι δεν έχει πρόταση)
                              'urgency': s['urgency'] if s else 'none'})
             return self.send(200, rows)
+        if p == '/api/customers': return self.send(200, [customer_out(r) for r in CUSTOMERS.values()])
+        m = re.fullmatch(r'/api/customers/(\d+)', p)
+        if m:
+            r = CUSTOMERS.get(int(m.group(1)))
+            return self.send(200, customer_out(r)) if r else self.err(404, 'not_found', 'customer not found')
         m = re.fullmatch(r'/api/customers/(\d+)/history', p)
         if m:
             t = int(m.group(1)); h = HISTORY.get(t)

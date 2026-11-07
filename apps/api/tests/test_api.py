@@ -106,6 +106,11 @@ def test_read_endpoints(env):
     c.post("/api/calls/events", json={"call_sid": "CA9", "status": "discussing", "role": "agent", "text": "Γεια"})
     assert c.get("/api/calls").json()[0]["transcript"][0]["text"] == "Γεια"
     assert c.get("/api/suggestions/NOPE").status_code == 404
+    cu = c.get(f"/api/customers/{s['TRDR']}").json()
+    assert cu["NAME"] == s["CUSTOMER_NAME"] and cu["SALESMAN_NAME"] == s["SALESMAN_NAME"]
+    assert len(c.get("/api/customers").json()) == 140
+    assert c.get("/api/customers/999").status_code == 404
+    assert ev["coverage"]["pairs"] == 1975
 
 
 def test_reset_restores_seed(env):
@@ -128,3 +133,16 @@ def test_explanation_falls_back_when_llm_unavailable(env, monkeypatch):
 
     monkeypatch.setattr(explain_mod, "_get_client", lambda: Boom)
     assert c.get(f"/api/suggestions/{sid}/explanation").json()["source"] == "template"
+
+
+def test_new_forecast_run_reloads_proposals(tmp_path):
+    seed = tmp_path / "suggestions.json"
+    shutil.copy(PROCESSED / "suggestions.json", seed)
+    st = Store(tmp_path / "s.sqlite", seed)
+    sid = st.all()[0]["id"]
+    s = st.get(sid); s["status"] = "cancelled"; st.put(s)
+    assert Store(tmp_path / "s.sqlite", seed).get(sid)["status"] == "cancelled"      # ίδιο seed → κρατά state
+    data = json.loads(seed.read_text(encoding="utf-8")); data["suggestions"][0]["REASON"] = "νέο τρέξιμο"
+    seed.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    fresh = Store(tmp_path / "s.sqlite", seed)                                     # νέο seed → reload
+    assert fresh.get(sid)["status"] == "proposed"

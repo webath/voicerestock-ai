@@ -1,10 +1,10 @@
 import { Suspense } from "react";
-import { PageSkeleton } from "@/components/ui";
-import OrdersView from "./view";
+import { Loading } from "@/components/ui";
+import { OrdersView } from "./OrdersView";
 
 export default function OrdersPage() {
   return (
-    <Suspense fallback={<PageSkeleton />}>
+    <Suspense fallback={<Loading />}>
       <OrdersView />
     </Suspense>
   );
