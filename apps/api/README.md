@@ -1,16 +1,25 @@
 # apps/api — App API (FastAPI) — Δημήτρης
 
-Υλοποιεί **ακριβώς** τα endpoints του `docs/CONTRACTS.md` στο `:8000`.
-Το `scripts/mock_app_api.py` είναι η reference συμπεριφορά (versions, tokens, idempotency): το dashboard και το voice
-του Νίκου είναι χτισμένα πάνω του, άρα το πραγματικό API πρέπει να απαντά με τα ίδια σχήματα.
-
-- Διαβάζει `data/processed/suggestions.json`, forecasts, evaluation από το forecast service
-- State/audit σε SQLite
-- Μόνο αυτό κάνει `POST {ERP_BASE_URL}/api/draft-orders`
-- `/explanation`: LLM (Claude) που παίρνει **μόνο** το evidence και βγάζει ελληνικό κείμενο, χωρίς νέους αριθμούς
-- CORS ανοιχτό για `:3000`
+Υλοποιεί τα endpoints του [`docs/CONTRACTS.md`](../../docs/CONTRACTS.md) στο `:8000`. Swagger: `http://localhost:8000/docs`.
 
 ```bash
-cd apps/api
-uv sync && uv run uvicorn app.main:app --reload --port 8000
+./scripts/dev_backend.sh            # από τη ρίζα: pipeline + Mock ERP :8080 + API :8000
+# ή χειροκίνητα:
+cd services/forecast && uv run python -m forecast.ingest && uv run python -m forecast.suggest
+cd apps/api && uv sync && uv run uvicorn app.main:app --port 8000
+uv run pytest                       # 7 tests (fake ERP, χωρίς δίκτυο)
 ```
+
+| Αρχείο | Τι κάνει |
+|---|---|
+| `app/main.py` | Endpoints, κανόνες (versions, όρια ποσότητας, confirmation token, idempotency, κλείδωμα) |
+| `app/store.py` | SQLite state (`data/processed/app_state.sqlite`): suggestions, tokens, idempotency, calls, audit |
+| `app/erp.py` | `MockERPAdapter` → `POST {ERP_BASE_URL}/api/draft-orders` (αντικαταστάσιμο) |
+| `app/explain.py` | Ελληνική εξήγηση με Claude (`claude-opus-5-5`, effort `low`, server-side fallback). Χωρίς `ANTHROPIC_API_KEY` → template από τα ίδια πεδία |
+
+Εγγυήσεις:
+- **Exactly-once draft:** το POST στο ERP γίνεται μέσα σε lock· ίδιο `idempotency_key` ή ήδη `draft_created` → ίδιο `erp_draft_id`, κανένα δεύτερο write.
+- Αλλαγή ποσότητας ακυρώνει κάθε προηγούμενο `confirmation_token`.
+- Αποτυχία ERP → `status: failed` (502), ξαναδοκιμάζεται με νέο idempotency key.
+- Όλα τα writes στο `GET /api/audit` με `X-Actor`.
+- `POST /api/admin/reset` ξαναφορτώνει τις προτάσεις από το forecast (για «Run demo scenario»).
