@@ -66,7 +66,7 @@ def mock_explanation(s):
         if e.get('promo'): t += f" Ισχύει {e['promo']['name']} ({e['promo']['from']} έως {e['promo']['to']})."
         if e.get('cold_start'): t += f" Νέος πελάτης — η πρόβλεψη βασίζεται σε παρόμοιους ({e['peer_group']})."
         parts.append(t)
-    return {'text': '[MOCK, χωρίς LLM] ' + ' '.join(parts), 'grounded_on': ['burn_rate_per_day', 'last_purchase_qty', 'last_purchase_date', 'promo', 'cold_start']}
+    return {'text': '[MOCK, χωρίς LLM] ' + ' '.join(parts), 'source': 'template', 'model': None, 'grounded_on':['burn_rate_per_day', 'last_purchase_qty', 'last_purchase_date', 'promo', 'cold_start']}
 
 
 def now(): return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
@@ -130,12 +130,14 @@ class H(BaseHTTPRequestHandler):
             rows = [s for s in SUGS.values()
                     if ('salesman' not in q or str(s['SALESMAN']) == q['salesman']) and ('status' not in q or s['status'] == q['status'])]
             return self.send(200, sorted(rows, key=lambda s: (URG[s['urgency']], s['SUGGESTED_DELIVERY_DATE'])))
-        if p == '/api/risk':
-            rows = [{'TRDR': s['TRDR'], 'CUSTOMER_NAME': s['CUSTOMER_NAME'], 'SALESMAN': s['SALESMAN'], 'MTRL': l['MTRL'],
-                     'ITEM_NAME': l['ITEM_NAME'], 'PREDICTED_DEPLETION_DATE': l['PREDICTED_DEPLETION_DATE'],
+        if p == '/api/risk':   # contract: μόνο εξάντληση ≤ 14 μέρες, κατά ημερομηνία
+            rows = [{'TRDR': s['TRDR'], 'CUSTOMER_NAME': s['CUSTOMER_NAME'], 'CUSTOMER_CATEGORY': s['CUSTOMER_CATEGORY'],
+                     'AREA': s['AREA'], 'SALESMAN': s['SALESMAN'], 'MTRL': l['MTRL'], 'ITEM_NAME': l['ITEM_NAME'],
+                     'CATEGORY': ITEMS[str(l['MTRL'])]['MTRCATEGORY'], 'PREDICTED_DEPLETION_DATE': l['PREDICTED_DEPLETION_DATE'],
                      'days_left': days_between(TODAY, l['PREDICTED_DEPLETION_DATE']),
                      'CONFIDENCE': l['CONFIDENCE'], 'urgency': s['urgency'], 'suggestion_id': s['id']}
                     for s in SUGS.values() for l in s['LINES'] if 'salesman' not in q or str(s['SALESMAN']) == q['salesman']]
+            rows = [r for r in rows if r['days_left'] is not None and r['days_left'] <= 14]
             rows.sort(key=lambda r: r['PREDICTED_DEPLETION_DATE'])
             return self.send(200, rows[:int(q.get('limit', 50))])
         if p == '/api/forecasts':
@@ -144,9 +146,12 @@ class H(BaseHTTPRequestHandler):
             rows = []
             for m in TARGETS.get(t, []):
                 s, l = by_mtrl.get(m, (None, None))
-                rows.append({'TRDR': t, 'MTRL': m, 'ITEM_NAME': ITEMS[str(m)]['NAME'],
-                             'PREDICTED_DEPLETION_DATE': l['PREDICTED_DEPLETION_DATE'] if l else None,
-                             'CONFIDENCE': l['CONFIDENCE'] if l else None, 'urgency': s['urgency'] if s else 'low'})
+                dep = l['PREDICTED_DEPLETION_DATE'] if l else None
+                rows.append({'TRDR': t, 'MTRL': m, 'ITEM_NAME': ITEMS[str(m)]['NAME'], 'CATEGORY': ITEMS[str(m)]['MTRCATEGORY'],
+                             'PREDICTED_DEPLETION_DATE': dep, 'days_left': days_between(TODAY, dep),
+                             'CONFIDENCE': l['CONFIDENCE'] if l else None,
+                             # contract: «none» = καμία εξάντληση σε 90 μέρες (στο mock: ό,τι δεν έχει πρόταση)
+                             'urgency': s['urgency'] if s else 'none'})
             return self.send(200, rows)
         m = re.fullmatch(r'/api/customers/(\d+)/history', p)
         if m:
