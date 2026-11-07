@@ -14,7 +14,8 @@ from forecast import models as M
 from forecast.backtest import CUTOFFS, history, targets
 from forecast.ingest import load
 
-M.CFG["adaptive_promo"] = False  # το καταγεγραμμένο πείραμα αφορά το v3, όχι το default v4
+M.CFG["adaptive_promo"] = False  # το καταγεγραμμένο πείραμα αφορά το v3, όχι το default v5
+M.CFG["cadence_days"] = 180
 
 warnings.filterwarnings("ignore")
 CACHE = sys.argv[1] if len(sys.argv) > 1 else "data/processed/ml_cache"

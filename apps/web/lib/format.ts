@@ -30,6 +30,7 @@ export const MODEL_LABELS: Record<string, string> = {
   hybrid_v2: "Hybrid v2",
   hybrid_v3: "Hybrid v3",
   hybrid_v4: "Hybrid v4",
+  hybrid_v5: "Hybrid v5",
 };
 
 export const FACTOR_LABELS: Record<string, string> = {
