@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 import os
 os.environ["VR_NO_AUTOAPP"] = "1"
+os.environ["AGENT_DAILY_AT"] = ""
 from app import explain as explain_mod  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.store import PROCESSED, Store  # noqa: E402
@@ -203,3 +204,81 @@ def test_assistant_tools_are_read_only_and_grounded(env):
     assert ai_mod.run_tool(d, "customer_details", {"trdr": 1})["error"]
     assert ai_mod.run_tool(d, "search_customers", {"query": s["CUSTOMER_NAME"][:8]})["results"]
     assert erp.calls == [] and app_store.get(sid)["version"] == s["version"]   # κανένα write
+
+
+# ---------------- agent ----------------
+import sys  # noqa: E402
+import time  # noqa: E402
+
+from app.agent import AgentRunner  # noqa: E402
+
+FAKE_AGENT = r'''
+import json, sys, time
+ok = sys.argv[1] == "ok"; slow = float(sys.argv[2])
+e = lambda **k: print(json.dumps(k, ensure_ascii=False), flush=True)
+e(type="run", id="RUN-TEST", trigger="manual", started_at="2026-11-07T10:00:00", source="erp",
+  plan=[{"key": "fetch", "label": "Διάβασμα από το ERP"}, {"key": "validate", "label": "Έλεγχος"}])
+e(type="step", key="fetch", label="Διάβασμα από το ERP", status="running")
+time.sleep(slow)
+e(type="progress", key="fetch", detail="σελίδα 1/1", done=1, total=1)
+e(type="step", key="fetch", label="Διάβασμα από το ERP", status="done", detail="25.184 τιμολόγια", metrics={"invoices": 25184}, ms=5)
+e(type="step", key="validate", label="Έλεγχος", status="done" if ok else "error", detail="ok" if ok else "1/124 δεν περνούν", ms=1)
+e(type="end", id="RUN-TEST", status="done" if ok else "error", finished_at="2026-11-07T10:00:01")
+'''
+
+
+def make_agent_env(tmp_path, monkeypatch, ok=True, slow=0.0):
+    seed = tmp_path / "suggestions.json"
+    shutil.copy(PROCESSED / "suggestions.json", seed)
+    monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
+    runner = AgentRunner(on_finish=None, cmd=lambda trig: [sys.executable, "-c", FAKE_AGENT, "ok" if ok else "fail", str(slow)],
+                         runs_file=tmp_path / "runs.json", schedule="")
+    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), runner))
+    return c, runner
+
+
+def wait_agent(c, timeout=10):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        st = c.get("/api/agent").json()
+        if not st["running"]:
+            return st
+        time.sleep(0.05)
+    raise AssertionError("agent did not finish")
+
+
+def test_agent_run_keeps_approvals_when_suggestions_unchanged(tmp_path, monkeypatch):
+    c, _ = make_agent_env(tmp_path, monkeypatch)
+    sid = c.get("/api/suggestions").json()[0]["id"]
+    s = c.get(f"/api/suggestions/{sid}").json()
+    assert c.post(f"/api/suggestions/{sid}/confirm", json={"version": s["version"]}).status_code == 200
+    assert c.post("/api/agent/run").status_code == 202
+    st = wait_agent(c)
+    last = st["last"]
+    assert last["status"] == "done" and last["id"] == "RUN-TEST" and last["source"] == "erp"
+    assert [p["key"] for p in last["plan"]] == ["fetch", "validate", "handoff"]
+    assert last["steps"]["fetch"]["metrics"]["invoices"] == 25184
+    assert last["steps"]["handoff"]["metrics"]["reloaded"] is False
+    assert c.get(f"/api/suggestions/{sid}").json()["status"] == "confirmed"   # η έγκριση έμεινε
+
+
+def test_agent_reloads_when_suggestions_change(tmp_path, monkeypatch):
+    c, _ = make_agent_env(tmp_path, monkeypatch)
+    seed = tmp_path / "suggestions.json"
+    data = json.loads(seed.read_text(encoding="utf-8"))
+    data["suggestions"] = data["suggestions"][:5]
+    seed.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")   # «ο agent έγραψε νέες προτάσεις»
+    c.post("/api/agent/run")
+    st = wait_agent(c)
+    assert st["last"]["steps"]["handoff"]["metrics"] == {**st["last"]["steps"]["handoff"]["metrics"], "reloaded": True, "suggestions": 5}
+    assert len(c.get("/api/suggestions").json()) == 5
+
+
+def test_agent_conflict_and_failure(tmp_path, monkeypatch):
+    c, _ = make_agent_env(tmp_path, monkeypatch, ok=False, slow=0.4)
+    assert c.post("/api/agent/run").status_code == 202
+    assert c.post("/api/agent/run").status_code == 409            # ήδη τρέχει
+    st = wait_agent(c)
+    assert st["last"]["status"] == "error"
+    assert "handoff" not in st["last"]["steps"]                   # αποτυχία → τίποτα δεν δημοσιεύεται/φορτώνεται
+    assert st["last"]["steps"]["validate"]["status"] == "error"

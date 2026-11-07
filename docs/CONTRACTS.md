@@ -151,6 +151,8 @@ proposed|modified ──▶ cancelled
 | GET | `/api/customers/{trdr}/history?mtrl=5016` | – | `{"TRDR", "items": [{"MTRL", "ITEM_NAME", "points": [{"date": "2026-10-24", "qty": 4}]}]}` — καθαρή ποσότητα ανά μέρα (πιστωτικά αρνητικά, χωρίς ακυρωμένα/μεταφορικά). `mtrl` προαιρετικό |
 | GET | `/api/suggestions/{id}/explanation` | – | `{"text": "...", "source": "llm"\|"template", "model": "...", "grounded_on": [...]}` — ελληνική εξήγηση **μόνο** από το evidence |
 | GET | `/api/evaluation` | – | `{"source", "cutoffs", "default_model", "coverage": {"pairs", "targets", "with_date", "blank"}, "readme_reference": {...}, "rows": [{"model", "mae", "within_3", "within_7", "at_risk_precision", "at_risk_recall"}], "per_cutoff": [...]}` |
+| GET | `/api/agent` | – | *(μόνο dashboard)* `{"running", "current", "last", "schedule", "runs": [...]}` — εκτέλεση του VORA agent· `steps` ανά βήμα `{status, detail, metrics, ms}` |
+| POST | `/api/agent/run` | – | *(μόνο dashboard)* 202 + η εκτέλεση που ξεκίνησε · 409 `agent_running` αν τρέχει ήδη |
 | POST | `/api/calls/events` | `{"call_sid","type","status?","text?","role?","suggestion_id?","erp_draft_id?"}` | `{"ok": true}` — το Voice στέλνει εδώ ό,τι συμβαίνει |
 | GET | `/api/calls` | – | `Call[]` (πιο πρόσφατη πρώτη) |
 | GET | `/api/audit?limit=200` | – | `[{at, actor, action, suggestion_id, outcome}]` |

@@ -200,3 +200,27 @@ export function useApi<T>(path: string | null) {
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   return { data: state.data, error: state.error, loading: key !== null && state.key !== key, reload };
 }
+
+// ---------- VORA agent (GET /api/agent, POST /api/agent/run) ----------
+export type StepStatus = "running" | "done" | "error";
+export interface AgentStep { status: StepStatus; detail?: string | null; metrics?: Record<string, unknown> | null; ms?: number | null }
+export interface AgentRun {
+  id: string | null;
+  trigger: string;
+  status: "running" | "done" | "error";
+  started_at: string;
+  finished_at?: string;
+  source: "erp" | "csv" | null;
+  plan: { key: string; label: string }[];
+  steps: Record<string, AgentStep>;
+  progress: Record<string, { detail?: string; done?: number; total?: number }>;
+  warnings: string[];
+  summary?: Record<string, number | string>;
+}
+export interface AgentState {
+  running: boolean;
+  current: AgentRun | null;
+  last: AgentRun | null;
+  schedule: string | null;
+  runs: Pick<AgentRun, "id" | "trigger" | "status" | "started_at" | "finished_at" | "source" | "summary">[];
+}

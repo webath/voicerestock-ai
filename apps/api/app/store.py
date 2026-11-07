@@ -70,6 +70,14 @@ class Store:
     def _seed_hash(self) -> str:
         return hashlib.sha256(self.seed_path.read_bytes()).hexdigest()
 
+    def reload_if_changed(self) -> bool:
+        """Μετά από εκτέλεση του agent: νέες προτάσεις μόνο αν άλλαξε το suggestions.json (αλλιώς κρατά εγκρίσεις/drafts)."""
+        stored = self.db.execute("SELECT value FROM meta WHERE key = 'seed_hash'").fetchone()
+        if stored and stored[0] == self._seed_hash():
+            return False
+        self.reset()
+        return True
+
     def reset(self) -> int:
         """Ξαναφορτώνει τις προτάσεις από το forecast και σβήνει state (για «Run demo scenario»)."""
         sugs = json.loads(self.seed_path.read_text(encoding="utf-8"))["suggestions"]

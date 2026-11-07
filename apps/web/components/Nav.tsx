@@ -6,6 +6,7 @@ import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
   { href: "/", label: "Επισκόπηση" },
+  { href: "/agent", label: "Agent" },
   { href: "/risk", label: "At Risk" },
   { href: "/orders", label: "Παραγγελίες" },
   { href: "/customers", label: "Πελάτες" },

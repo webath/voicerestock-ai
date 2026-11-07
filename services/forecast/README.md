@@ -5,11 +5,12 @@ Ingestion → cleaning → features → model → backtest → submission + sugg
 ```bash
 cd services/forecast
 uv sync
-uv run pytest                         # 14 tests: cleaning, scoring, submission format, ακρίβεια μοντέλου
+uv run pytest                         # 17 tests: cleaning, scoring, submission, ακρίβεια, agent (ERP = CSV, κανόνες)
 uv run python -m forecast.ingest      # report + data/processed/*.parquet
 uv run python -m forecast.backtest    # σύγκριση μοντέλων, βαθμονομημένο truth + proxy (--family: ευστάθεια, -v: ανά cutoff)
 uv run python -m forecast.submit      # submissions/team_voicerestock.csv (default μοντέλο: hybrid_v3)
 uv run python -m forecast.suggest     # data/processed/{suggestions,forecasts,evaluation}.json για το App API
+uv run python -m forecast.agent       # όλος ο κύκλος από το ERP API (ERP_BASE_URL) — ingest+submit+suggest+έλεγχοι (--source csv: από τα CSV)
 ```
 
 Τρέχον μοντέλο: **`hybrid_v3`**, MAE backtest **2,92** (βαθμονομημένο truth· baseline 13,2, v2 5,47). Λεπτομέρειες: `docs/RESULTS.md`.
