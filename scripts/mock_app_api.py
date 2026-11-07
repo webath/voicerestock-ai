@@ -78,6 +78,15 @@ def mock_explanation(s):
     return {'text': '[MOCK, χωρίς LLM] ' + ' '.join(parts), 'source': 'template', 'model': None, 'grounded_on':['burn_rate_per_day', 'last_purchase_qty', 'last_purchase_date', 'promo', 'cold_start']}
 
 
+def with_value(s):
+    # όπως το πραγματικό API: αξία = Σ QTY1 × MTRL.PRICER (δεν πάει στο ERP)
+    total = 0.0
+    for l in s['LINES']:
+        l['PRICE'] = float(ITEMS[str(l['MTRL'])]['PRICER']); l['LINE_VALUE'] = round(l['PRICE'] * l['QTY1'], 2); total += l['LINE_VALUE']
+    s['VALUE'] = round(total, 2)
+    return s
+
+
 def now(): return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
@@ -138,7 +147,7 @@ class H(BaseHTTPRequestHandler):
         if p == '/api/suggestions':
             rows = [s for s in SUGS.values()
                     if ('salesman' not in q or str(s['SALESMAN']) == q['salesman']) and ('status' not in q or s['status'] == q['status'])]
-            return self.send(200, sorted(rows, key=lambda s: (URG[s['urgency']], s['SUGGESTED_DELIVERY_DATE'])))
+            return self.send(200, [with_value(r) for r in sorted(rows, key=lambda s: (URG[s['urgency']], s['SUGGESTED_DELIVERY_DATE']))])
         if p == '/api/risk':   # contract: μόνο εξάντληση ≤ 14 μέρες, κατά ημερομηνία
             rows = [{'TRDR': s['TRDR'], 'CUSTOMER_NAME': s['CUSTOMER_NAME'], 'CUSTOMER_CATEGORY': s['CUSTOMER_CATEGORY'],
                      'AREA': s['AREA'], 'SALESMAN': s['SALESMAN'], 'MTRL': l['MTRL'], 'ITEM_NAME': l['ITEM_NAME'],
@@ -185,7 +194,7 @@ class H(BaseHTTPRequestHandler):
         m = re.fullmatch(r'/api/suggestions/([\w-]+)', p)
         if m:
             s = SUGS.get(m.group(1))
-            return self.send(200, s) if s else self.err(404, 'not_found', 'suggestion not found')
+            return self.send(200, with_value(s)) if s else self.err(404, 'not_found', 'suggestion not found')
         self.err(404, 'not_found', 'unknown path')
 
     def do_POST(self):
@@ -228,7 +237,7 @@ class H(BaseHTTPRequestHandler):
                     return self.err(400, 'qty_out_of_bounds', f"qty must be integer in {line['QTY_MIN']}..{line['QTY_MAX']}")
                 line['QTY1'] = qty; s['version'] += 1; s['status'] = 'modified'; s['updated_at'] = now()
                 for t in [t for t, v in TOKENS.items() if v[0] == sid]: TOKENS.pop(t)   # παλιά confirmations άκυρα
-                audit(actor, f'quantity {mtrl}={qty}', sid, 'ok'); return self.send(200, s)
+                audit(actor, f'quantity {mtrl}={qty}', sid, 'ok'); return self.send(200, with_value(s))
 
             if action == 'confirm':
                 if s['status'] not in ('proposed', 'modified', 'confirmed', 'failed'): return self.err(409, 'locked', f"status is {s['status']}")

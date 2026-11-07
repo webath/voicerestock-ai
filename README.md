@@ -13,6 +13,8 @@
 | **Δημήτρης** | Data, backend & dashboard: forecasting, submission, suggested orders, App API, LLM εξηγήσεις, Next.js dashboard |
 | **Νίκος** | Voice agent (Twilio + LLM) |
 
+📖 **Πώς δουλεύει όλο το σύστημα, βήμα βήμα: [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md)**
+
 ➡️ **Ξεκίνα από το [`docs/PLAN.md`](docs/PLAN.md)** (σειρά υλοποίησης & checkboxes) και το [`docs/CONTRACTS.md`](docs/CONTRACTS.md).
 
 ## Αρχιτεκτονική

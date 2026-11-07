@@ -6,7 +6,8 @@ import {
   EmptyState, ErrorBox, FilterBar, Loading, Meter, PageHeader, Segmented, Select, StatusBadge, UrgencyBadge,
 } from "@/components/ui";
 import { ApiError, apiPost, useApi, type Salesman, type Suggestion } from "@/lib/api";
-import { fmtDay, fmtDayLong, fmtNum } from "@/lib/format";
+import { useToast } from "@/components/Toast";
+import { fmtDay, fmtDayLong, fmtEur, fmtEur2, fmtNum } from "@/lib/format";
 
 type Tab = "todo" | "done" | "all";
 const TODO = ["proposed", "modified", "confirmed", "failed"];
@@ -36,6 +37,7 @@ export function OrdersView() {
     todo: list.filter((s) => TODO.includes(s.status)).length,
     done: list.filter((s) => s.status === "draft_created").length,
   };
+  const shownValue = rows.reduce((a, s) => a + (s.VALUE ?? 0), 0);
 
   return (
     <>
@@ -49,6 +51,12 @@ export function OrdersView() {
         <input type="search" className="field w-60 max-w-full" placeholder="Πελάτης ή είδος" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Αναζήτηση" />
       </FilterBar>
 
+      {rows.length > 0 && (
+        <p className="fade-in mb-3 text-sm text-ink-2">
+          <strong className="text-ink">{fmtNum(rows.length)}</strong> παραγγελίες · συνολική αξία <strong className="text-ink">{fmtEur(shownValue)}</strong>
+          <span className="text-ink-muted"> (καθαρή, τιμές καταλόγου 2026)</span>
+        </p>
+      )}
       {rows.length === 0 ? (
         <EmptyState title={tab === "done" ? "Καμία παραγγελία στο ERP ακόμη" : "Δεν υπάρχουν παραγγελίες εδώ"}>
           {tab === "done" ? "Εγκρίνετε μια πρόταση από την καρτέλα «Προς έγκριση»." : "Άλλαξε φίλτρα."}
@@ -70,6 +78,7 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLElement>(null);
+  const toast = useToast();
   const locked = s.status === "draft_created" || s.status === "posting" || s.status === "cancelled";
   const units = s.LINES.reduce((a, l) => a + l.QTY1, 0);
   const changed = s.LINES.some((l) => l.QTY1 !== l.QTY_RECOMMENDED);
@@ -81,7 +90,9 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
   async function run<T>(label: string, fn: () => Promise<T>) {
     setBusy(label); setErr(null);
     try { return await fn(); } catch (e) {
-      setErr(e instanceof ApiError && e.code === "version_conflict" ? "Η πρόταση άλλαξε από αλλού (π.χ. από την κλήση). Ανανέωσε τη σελίδα." : (e as Error).message);
+      const msg = e instanceof ApiError && e.code === "version_conflict" ? "Η πρόταση άλλαξε από αλλού (π.χ. από την κλήση). Ανανέωσε τη σελίδα." : (e as Error).message;
+      setErr(msg);
+      if (label === "approve") toast({ kind: "error", title: "Δεν δημιουργήθηκε draft", text: msg });
     } finally { setBusy(null); }
   }
 
@@ -95,6 +106,8 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
     const d = await apiPost<{ erp_draft_id: string; status: string }>(`/api/suggestions/${s.id}/create-draft`,
       { confirmation_token: c.confirmation_token, idempotency_key: `web:${s.id}:v${c.snapshot.version}` });
     onChange({ ...c.snapshot, status: d.status, erp_draft_id: d.erp_draft_id });
+    toast({ kind: "success", title: `Draft στο ERP: ${d.erp_draft_id}`,
+      text: `${s.CUSTOMER_NAME} · ${c.snapshot.LINES.length} είδη · ${fmtEur(c.snapshot.VALUE)} · παράδοση ${fmtDayLong(s.SUGGESTED_DELIVERY_DATE)}` });
   });
 
   const cancel = () => run("cancel", async () => onChange(await apiPost<Suggestion>(`/api/suggestions/${s.id}/cancel`)));
@@ -113,7 +126,7 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
         </span>
         <span className="text-right sm:w-24">
           <span className="block text-sm font-semibold text-ink tnum">{fmtNum(s.LINES.length)} είδη</span>
-          <span className="block text-xs text-ink-muted tnum">{fmtNum(units)} μονάδες</span>
+          <span className="block text-xs text-ink-muted tnum">{fmtNum(units)} μον. · {fmtEur(s.VALUE)}</span>
         </span>
         <span className="flex flex-1 justify-end gap-2 sm:w-56 sm:flex-none"><UrgencyBadge urgency={s.urgency} /><StatusBadge status={s.status} /></span>
         <span aria-hidden className="text-ink-muted transition-transform duration-300" style={{ transform: open ? "rotate(180deg)" : "none" }}>⌄</span>
@@ -128,7 +141,7 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
             </div>
             <div className="overflow-x-auto">
               <table className="data">
-                <thead><tr><th>Είδος</th><th className="hidden sm:table-cell">Τελειώνει</th><th className="hidden sm:table-cell">Confidence</th><th className="num">Ποσότητα</th></tr></thead>
+                <thead><tr><th>Είδος</th><th className="hidden sm:table-cell">Τελειώνει</th><th className="hidden sm:table-cell">Confidence</th><th className="num">Ποσότητα</th><th className="num hidden md:table-cell">Αξία</th></tr></thead>
                 <tbody>
                   {s.LINES.map((l) => (
                     <tr key={l.MTRL}>
@@ -148,6 +161,9 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
                             disabled={locked || !!busy || l.QTY1 >= l.QTY_MAX} onClick={() => setQty(l.MTRL, l.QTY1 + 1)}>+</button>
                         </span>
                         {l.QTY1 !== l.QTY_RECOMMENDED && <div className="text-xs text-ink-muted">πρόταση {fmtNum(l.QTY_RECOMMENDED)}</div>}
+                      </td>
+                      <td className="num hidden whitespace-nowrap md:table-cell">
+                        {fmtEur2(l.LINE_VALUE)}<div className="text-xs text-ink-muted">{fmtEur2(l.PRICE)} / {l.UNIT}</div>
                       </td>
                     </tr>
                   ))}

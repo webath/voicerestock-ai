@@ -1,12 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { AiBadge, CustomerMessage } from "@/components/AiText";
 import { PurchaseTimeline } from "@/components/charts/PurchaseTimeline";
-import { Card, Chip, ErrorBox, Loading, PageHeader, UrgencyBadge } from "@/components/ui";
+import { Card, Chip, ErrorBox, Loading, PageHeader, SkeletonLines, UrgencyBadge } from "@/components/ui";
 import {
   useApi, type Customer, type Explanation, type Forecast, type History, type Suggestion, type SuggestionLine,
 } from "@/lib/api";
-import { FACTOR_LABELS, fmt1, fmtDay, fmtDayLong, fmtNum, fmtPct } from "@/lib/format";
+import { FACTOR_LABELS, fmt1, fmtDay, fmtDayLong, fmtEur, fmtNum, fmtPct } from "@/lib/format";
 
 const STATUS_LABEL: Record<string, string> = {
   proposed: "Πρόταση", modified: "Τροποποιημένη", confirmed: "Επιβεβαιωμένη", posting: "Αποστολή στο ERP…",
@@ -64,20 +65,23 @@ export function CustomerView({ trdr }: { trdr: number }) {
         </Card>
 
         <Card title="Προτεινόμενη παραγγελία"
-          subtitle={suggestion ? <>Παράδοση <strong className="text-ink">{fmtDayLong(suggestion.SUGGESTED_DELIVERY_DATE)}</strong> · {STATUS_LABEL[suggestion.status] ?? suggestion.status}</> : undefined}>
+          subtitle={suggestion ? <>Παράδοση <strong className="text-ink">{fmtDayLong(suggestion.SUGGESTED_DELIVERY_DATE)}</strong> · <strong className="text-ink">{fmtEur(suggestion.VALUE)}</strong> · {STATUS_LABEL[suggestion.status] ?? suggestion.status}</> : undefined}>
           {!suggestion ? (
             <p className="text-sm text-ink-2">Κανένα είδος δεν τελειώνει στις επόμενες 3 εβδομάδες — δεν χρειάζεται παραγγελία τώρα.</p>
           ) : (
             <>
-              <div className="rounded-lg bg-surface-2 p-3 text-sm text-ink-2">
+              <div className="ai-shine rounded-xl bg-surface-2 p-3 text-sm text-ink-2">
                 {explanation.data ? (
                   <>
                     <p className="text-ink">{explanation.data.text}</p>
-                    <p className="mt-2 text-xs text-ink-muted">
-                      {explanation.data.source === "llm" ? "Εξήγηση από AI με βάση τα στοιχεία της πρόβλεψης" : "Αυτόματη περίληψη των στοιχείων της πρόβλεψης"}
+                    <p className="mt-2 flex items-center gap-2 text-xs text-ink-muted">
+                      <AiBadge source={explanation.data.source} />
+                      {explanation.data.source === "llm" ? "εξήγηση μόνο από τα στοιχεία της πρόβλεψης" : "από τα στοιχεία της πρόβλεψης"}
                     </p>
                   </>
-                ) : explanation.error ? "Η εξήγηση δεν είναι διαθέσιμη." : "Ετοιμάζεται εξήγηση…"}
+                ) : explanation.error ? "Η εξήγηση δεν είναι διαθέσιμη." : (
+                  <><SkeletonLines lines={4} /><p className="mt-2 text-xs text-ink-muted">Το AI ετοιμάζει εξήγηση από τα στοιχεία της πρόβλεψης…</p></>
+                )}
               </div>
               <ul className="mt-4 divide-y divide-[var(--grid)] text-sm">
                 {suggestion.LINES.map((l) => (
@@ -90,8 +94,14 @@ export function CustomerView({ trdr }: { trdr: number }) {
                   </li>
                 ))}
               </ul>
-              {suggestion.erp_draft_id && <p className="mt-3 text-xs text-ink-2">ERP draft: <code>{suggestion.erp_draft_id}</code></p>}
-              <p className="mt-3 text-xs text-ink-muted">Έγκριση και αλλαγή ποσοτήτων από τη σελίδα <Link href="/orders" className="underline">Παραγγελίες</Link>.</p>
+              {suggestion.erp_draft_id && <p className="mt-3 text-xs text-ink-2"><span aria-hidden style={{ color: "var(--good)" }}>✓</span> ERP draft: <code>{suggestion.erp_draft_id}</code></p>}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {suggestion.status !== "draft_created" && suggestion.status !== "cancelled" && (
+                  <Link href={`/orders?open=${suggestion.id}`} className="btn btn-primary flex-1">Έλεγχος & έγκριση</Link>
+                )}
+                <Link href={`/voice?salesman=${suggestion.SALESMAN}`} className="btn btn-ghost flex-1">📞 Κάλεσε τον πωλητή</Link>
+              </div>
+              <CustomerMessage suggestionId={suggestion.id} />
             </>
           )}
         </Card>

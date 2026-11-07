@@ -16,9 +16,10 @@ from functools import lru_cache
 import pandas as pd
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, StrictInt
 
+from . import assistant as ai
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
 from .store import PROCESSED, ROOT, Store
@@ -47,6 +48,20 @@ class DraftBody(BaseModel):
     idempotency_key: str
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatBody(BaseModel):
+    messages: list[ChatMessage]
+    salesman: int | None = None
+
+
+class MessageBody(BaseModel):
+    channel: str = "sms"
+
+
 class CallEvent(BaseModel):
     call_sid: str
     type: str | None = None
@@ -64,6 +79,7 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> Fas
     app.state.store = store or Store()
     app.state.erp = erp or MockERPAdapter()
     app.state.explanations = {}
+    app.state.ai_cache = {}
 
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, e: ApiError):
@@ -247,6 +263,37 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> Fas
     def call_event(ev: CallEvent):
         S().call_event(ev.model_dump())
         return {"ok": True}
+
+    # ---------------- AI βοηθός (μόνο ανάγνωση) ----------------
+    data = ai.Data(suggestions=lambda: S().all(), forecasts=_forecasts, customers=_customers,
+                   evaluation=lambda: json.loads((PROCESSED / "evaluation.json").read_text(encoding="utf-8")),
+                   salesmen=_salesman_names)
+
+    @app.post("/api/assistant")
+    def assistant(body: ChatBody):
+        hist = [m.model_dump() for m in body.messages]
+        return StreamingResponse(ai.chat_stream(data, hist, body.salesman), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/briefing")
+    def briefing(salesman: int):
+        if salesman not in _salesman_names():
+            raise ApiError(404, "not_found", "unknown salesman")
+        state = tuple(sorted((s["id"], s["version"], s["status"]) for s in S().all() if s["SALESMAN"] == salesman))
+        key = ("briefing", salesman, hash(state))
+        if key not in app.state.ai_cache:
+            app.state.ai_cache[key] = ai.briefing(data, salesman)
+        return app.state.ai_cache[key]
+
+    @app.post("/api/suggestions/{sid}/customer-message")
+    def customer_message(sid: str, body: MessageBody):
+        if body.channel not in ("sms", "email"):
+            raise ApiError(400, "bad_request", "channel must be sms or email")
+        s = must_get(sid)
+        key = ("msg", sid, s["version"], body.channel)
+        if key not in app.state.ai_cache:
+            app.state.ai_cache[key] = ai.customer_message(s, body.channel)
+        return app.state.ai_cache[key]
 
     @app.post("/api/admin/reset")
     def reset(x_actor: str = Header("unknown")):

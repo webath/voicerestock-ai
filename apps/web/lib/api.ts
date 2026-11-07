@@ -41,6 +41,8 @@ export interface SuggestionLine {
   PREDICTED_DEPLETION_DATE: string;
   CONFIDENCE: number;
   evidence: Evidence;
+  PRICE?: number;        // € ανά UNIT (τιμή καταλόγου 2026) — από το API
+  LINE_VALUE?: number;   // QTY1 × PRICE
 }
 
 export interface Suggestion {
@@ -60,6 +62,7 @@ export interface Suggestion {
   LINES: SuggestionLine[];
   erp_draft_id: string | null;
   updated_at: string;
+  VALUE?: number;        // € καθαρά, Σ LINE_VALUE
 }
 
 export interface Customer {

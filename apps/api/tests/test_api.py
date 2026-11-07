@@ -157,3 +157,49 @@ def test_idempotency_key_is_scoped_to_suggestion(env):
         assert r.status_code == 200
     assert len(erp.calls) == 2                                   # δύο διαφορετικά drafts
     assert c.get(f"/api/suggestions/{a}").json()["erp_draft_id"] != c.get(f"/api/suggestions/{b}").json()["erp_draft_id"]
+
+
+def test_value_follows_quantity(env):
+    c, erp, sid = env
+    s = c.get(f"/api/suggestions/{sid}").json()
+    l = s["LINES"][0]
+    assert s["VALUE"] == round(sum(x["PRICE"] * x["QTY1"] for x in s["LINES"]), 2)
+    n = c.post(f"/api/suggestions/{sid}/lines/{l['MTRL']}/quantity", json={"qty": l["QTY1"] + 1, "version": 1}).json()
+    assert round(n["VALUE"] - s["VALUE"], 2) == round(l["PRICE"], 2)
+    tok = c.post(f"/api/suggestions/{sid}/confirm", json={"version": 2}).json()["confirmation_token"]
+    c.post(f"/api/suggestions/{sid}/create-draft", json={"confirmation_token": tok, "idempotency_key": "v"})
+    assert "VALUE" not in erp.calls[0] and "PRICE" not in erp.calls[0]["LINES"][0]   # το ERP payload δεν αλλάζει
+
+
+def test_ai_endpoints_fall_back_without_llm(env, monkeypatch):
+    c, erp, sid = env
+    from app import assistant as ai_mod
+    monkeypatch.setattr(ai_mod, "_get_client", lambda: None)
+    s = c.get(f"/api/suggestions/{sid}").json()
+    b = c.get(f"/api/briefing?salesman={s['SALESMAN']}").json()
+    assert b["source"] == "template" and "€" in b["text"] and f"/customers/" in b["text"]
+    m = c.post(f"/api/suggestions/{sid}/customer-message", json={"channel": "sms"}).json()
+    assert m["source"] == "template" and s["LINES"][0]["ITEM_NAME"] in m["text"]
+    assert c.post(f"/api/suggestions/{sid}/customer-message", json={"channel": "fax"}).status_code == 400
+    r = c.post("/api/assistant", json={"messages": [{"role": "user", "content": "γεια"}]})
+    assert r.status_code == 200 and '"type": "error"' in r.text
+    assert erp.calls == []                                   # τίποτα δεν γράφτηκε
+
+
+def test_assistant_tools_are_read_only_and_grounded(env):
+    c, erp, sid = env
+    from app import assistant as ai_mod
+    from app.main import _customers, _forecasts, _salesman_names
+    app_store = c.app.state.store
+    d = ai_mod.Data(suggestions=app_store.all, forecasts=_forecasts, customers=_customers,
+                    evaluation=lambda: {"rows": []}, salesmen=_salesman_names)
+    s = app_store.get(sid)
+    p = ai_mod.run_tool(d, "portfolio_summary", {"salesman": s["SALESMAN"]})
+    assert p["open_proposals"] > 0 and p["open_value_eur"] > 0
+    r = ai_mod.run_tool(d, "at_risk", {"days": 3, "category": "Νερά"})
+    assert all(x["days_left"] <= 3 and x["category"] == "Νερά" for x in r["rows"])
+    cd = ai_mod.run_tool(d, "customer_details", {"trdr": s["TRDR"]})
+    assert cd["proposal"]["id"] == sid and cd["forecasts"]
+    assert ai_mod.run_tool(d, "customer_details", {"trdr": 1})["error"]
+    assert ai_mod.run_tool(d, "search_customers", {"query": s["CUSTOMER_NAME"][:8]})["results"]
+    assert erp.calls == [] and app_store.get(sid)["version"] == s["version"]   # κανένα write
