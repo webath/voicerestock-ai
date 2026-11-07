@@ -154,6 +154,9 @@ proposed|modified ──▶ cancelled
 | POST | `/api/calls/events` | `{"call_sid","type","status?","text?","role?","suggestion_id?","erp_draft_id?"}` | `{"ok": true}` — το Voice στέλνει εδώ ό,τι συμβαίνει |
 | GET | `/api/calls` | – | `Call[]` (πιο πρόσφατη πρώτη) |
 | GET | `/api/audit?limit=200` | – | `[{at, actor, action, suggestion_id, outcome}]` |
+| POST | `/api/assistant` | `{"messages": [{"role":"user","content":"…"}], "salesman": 105}` | **SSE** (`text/event-stream`): `{"type":"tool","name","label","input"}` · `{"type":"text","delta"}` · `{"type":"done"}` · `{"type":"error","message"}` — AI βοηθός, εργαλεία μόνο ανάγνωσης |
+| GET | `/api/briefing?salesman=105` | – | `{"text", "source": "llm"\|"template", "data": {...}}` — πρωινό briefing (markdown με links) |
+| POST | `/api/suggestions/{id}/customer-message` | `{"channel": "sms"\|"email"}` | `{"text", "source", "channel"}` — μήνυμα προς τον πελάτη (δεν στέλνεται αυτόματα) |
 | POST | `/api/admin/reset` | – | `{"ok": true, "suggestions": 124}` — ξαναφορτώνει τις προτάσεις (demo) |
 
 Το `create-draft` στο App API μετατρέπει τη Suggestion σε payload ERP:

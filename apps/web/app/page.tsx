@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DayColumns } from "@/components/charts/DayColumns";
+import { Briefing } from "@/components/AiText";
 import { CallStatusBadge } from "@/components/CallStatus";
 import { Card, ErrorBox, Loading, PageHeader, StatTile, UrgencyBadge } from "@/components/ui";
 import {
@@ -72,6 +73,10 @@ export default function Overview() {
         subtitle="Ποιοι πελάτες κινδυνεύουν να ξεμείνουν τις επόμενες μέρες, και τι προτείνουμε να τους στείλουμε.">
         <button className="btn btn-ghost" onClick={reset} disabled={resetting}>{resetting ? "Επαναφορά…" : "Επαναφορά demo"}</button>
       </PageHeader>
+
+      <div className="reveal mb-6">
+        <Briefing salesmen={salesmen.data ?? []} />
+      </div>
 
       <div className="reveal grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile hero label="Πελάτες σε κίνδυνο" value={fmtNum(stats.atRiskCustomers)}

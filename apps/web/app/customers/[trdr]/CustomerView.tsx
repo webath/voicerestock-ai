@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { AiBadge, CustomerMessage } from "@/components/AiText";
 import { PurchaseTimeline } from "@/components/charts/PurchaseTimeline";
 import { Card, Chip, ErrorBox, Loading, PageHeader, SkeletonLines, UrgencyBadge } from "@/components/ui";
 import {
@@ -69,12 +70,13 @@ export function CustomerView({ trdr }: { trdr: number }) {
             <p className="text-sm text-ink-2">Κανένα είδος δεν τελειώνει στις επόμενες 3 εβδομάδες — δεν χρειάζεται παραγγελία τώρα.</p>
           ) : (
             <>
-              <div className="rounded-lg bg-surface-2 p-3 text-sm text-ink-2">
+              <div className="ai-shine rounded-xl bg-surface-2 p-3 text-sm text-ink-2">
                 {explanation.data ? (
                   <>
                     <p className="text-ink">{explanation.data.text}</p>
-                    <p className="mt-2 text-xs text-ink-muted">
-                      {explanation.data.source === "llm" ? "Εξήγηση από AI με βάση τα στοιχεία της πρόβλεψης" : "Αυτόματη περίληψη των στοιχείων της πρόβλεψης"}
+                    <p className="mt-2 flex items-center gap-2 text-xs text-ink-muted">
+                      <AiBadge source={explanation.data.source} />
+                      {explanation.data.source === "llm" ? "εξήγηση μόνο από τα στοιχεία της πρόβλεψης" : "από τα στοιχεία της πρόβλεψης"}
                     </p>
                   </>
                 ) : explanation.error ? "Η εξήγηση δεν είναι διαθέσιμη." : (
@@ -99,6 +101,7 @@ export function CustomerView({ trdr }: { trdr: number }) {
                 )}
                 <Link href={`/voice?salesman=${suggestion.SALESMAN}`} className="btn btn-ghost flex-1">📞 Κάλεσε τον πωλητή</Link>
               </div>
+              <CustomerMessage suggestionId={suggestion.id} />
             </>
           )}
         </Card>

@@ -139,13 +139,46 @@ proposed ──(αλλαγή ποσότητας)──▶ modified ──▶ con
 `POST /api/draft-orders` του mock ERP επικυρώνει (`TRDR`, `MTRL` υπάρχουν, `QTY1 > 0`, ημερομηνία) και αποθηκεύει
 `team_pack/draft_orders/DRAFT-….json` — ακριβώς στη μορφή του `sample_suggested_order.json`. **Draft**, ποτέ τελική παραγγελία.
 
-## ⑧ Εξηγήσεις AI — `apps/api/app/explain.py`
+## ⑧ AI — εξηγήσεις, βοηθός, briefing, μήνυμα πελάτη
+
+Όλα με Claude (`claude-opus-5-5`, χαμηλό effort, αυτόματο fallback σε άλλο μοντέλο αν αρνηθεί). Κανένα δεν γράφει σε
+παραγγελίες ή ERP· χωρίς κλειδί ή αν αποτύχει, πέφτουν σε έτοιμο κείμενο από τα ίδια νούμερα.
+
+| Feature | Τι κάνει | Κώδικας |
+|---|---|---|
+| **«Ρώτα το AI»** (κουμπί κάτω δεξιά σε κάθε σελίδα, ⌘J) | Ο πωλητής ρωτά ελεύθερα στα ελληνικά. Το Claude καλεί μόνο του εργαλεία **μόνο ανάγνωσης** (`portfolio_summary`, `at_risk`, `search_customers`, `customer_details`, `model_accuracy`), το dashboard δείχνει live κάθε βήμα και η απάντηση γράφεται σταδιακά (streaming) με links σε πελάτες/παραγγελίες | `apps/api/app/assistant.py` · `POST /api/assistant` (SSE) · `apps/web/components/AssistantPanel.tsx` |
+| **Πρωινό briefing** (Επισκόπηση) | «Καλημέρα Στέλιο: 33 πελάτες, 15.848 €, ξεκίνα από…» — από τα στοιχεία του χαρτοφυλακίου του πωλητή | `GET /api/briefing?salesman=` · `components/AiText.tsx` |
+| **Εξήγηση πρότασης** (σελίδα πελάτη) | 2–3 προτάσεις γιατί προτείνεται η παραγγελία, μόνο από το evidence | `apps/api/app/explain.py` · `GET /api/suggestions/{id}/explanation` |
+| **Μήνυμα προς πελάτη** (σελίδα πελάτη → SMS / Email) | Έτοιμο κείμενο προς τον πελάτη με τα είδη, τις ποσότητες και την ημερομηνία· ο πωλητής το αντιγράφει και το στέλνει ο ίδιος | `POST /api/suggestions/{id}/customer-message` |
+
+### Εξηγήσεις AI — λεπτομέρειες (`apps/api/app/explain.py`)
 
 `claude-opus-5-5` (χαμηλό effort, αυτόματο fallback σε άλλο μοντέλο αν αρνηθεί). Παίρνει **μόνο** τα στοιχεία της πρόβλεψης
 με περιγραφικά ελληνικά ονόματα και γράφει 2–3 προτάσεις· δεν επιτρέπεται να προσθέσει αριθμούς. Χωρίς κλειδί ή αν αποτύχει →
 έτοιμο κείμενο από τα ίδια νούμερα. Κρατιέται στη μνήμη ανά (πρόταση, version).
 
 ---
+
+## Χάρτης όλων των features
+
+| Feature | Πού το βρίσκω | Κώδικας |
+|---|---|---|
+| Καθαρισμός ERP (join, ακυρωμένα, πιστωτικά, δώρα, μεταφορικά) | — (τρέχει στο `dev_backend.sh`) | `services/forecast/src/forecast/ingest.py` |
+| Πρόβλεψη εξάντλησης `hybrid_0.7` | Αξιολόγηση, At Risk, Πελάτης | `services/forecast/src/forecast/models.py` |
+| Backtest & σύγκριση μοντέλων | **Αξιολόγηση** | `backtest.py`, `score.py`, `docs/RESULTS.md` |
+| Αρχείο υποβολής (1.975 γραμμές) | `submissions/team_*.csv` | `submit.py` |
+| Suggested orders, μέρες δρομολογίου, ποσότητες, confidence | **Παραγγελίες**, Πελάτης | `suggest.py` |
+| Αξία σε € | Επισκόπηση, Παραγγελίες, Πελάτης | `apps/api/app/store.py` (`with_value`) |
+| Έγκριση → draft στο ERP (exactly-once, audit) | **Παραγγελίες** → «Έγκριση & αποστολή στο ERP» | `apps/api/app/main.py`, `erp.py` |
+| Πελάτες σε κίνδυνο, εξαντλήσεις ανά μέρα, ανά πωλητή | **Επισκόπηση** | `apps/web/app/page.tsx` |
+| Φίλτρα & εξαγωγή CSV | **At Risk** | `apps/web/app/risk/RiskView.tsx` |
+| Ιστορικό παραλαβών + εκτιμώμενο απόθεμα | **Πελάτης** (γράφημα) | `components/charts/PurchaseTimeline.tsx` |
+| Τηλεφωνική κλήση AI (live βήματα, transcript) | **Κλήσεις** → «Κάλεσε τον πωλητή» | `apps/voice/`, `app/voice/VoiceView.tsx` |
+| AI βοηθός · briefing · εξήγηση · μήνυμα πελάτη | κουμπί «✦ Ρώτα το AI» · Επισκόπηση · Πελάτης | `apps/api/app/assistant.py`, `explain.py` |
+| Γρήγορη αναζήτηση | ⌘K / «Αναζήτηση» στο μενού | `components/CommandPalette.tsx` |
+| Θέμα light / dark / αυτόματο | κουμπί ◐ στο μενού | `components/ThemeToggle.tsx` |
+| Επαναφορά demo | **Επισκόπηση** → «Επαναφορά demo» | `POST /api/admin/reset` |
+| Έλεγχος voice ⇄ API | `python3 scripts/check_voice_vs_api.py` | `scripts/check_voice_vs_api.py` |
 
 ## Ένα παράδειγμα από την αρχή ως το τέλος — Mini Market Οικονομικό (1004)
 

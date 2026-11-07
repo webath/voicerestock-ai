@@ -335,6 +335,62 @@ table.data tbody tr[aria-selected="true"] { background: var(--series-1-wash); }
 .palette { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; animation: rise 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .count-up { animation: fade 400ms ease both; }
 
+/* ---------- AI ---------- */
+.ai-gradient { background: linear-gradient(135deg, var(--series-1), #1baf7a 55%, #6250d6); }
+.ai-fab {
+  background: linear-gradient(135deg, var(--series-1), #1baf7a 60%, #6250d6);
+  box-shadow: 0 10px 30px -10px var(--series-1), 0 0 0 1px rgba(255, 255, 255, 0.25) inset;
+  transition: transform 200ms ease, opacity 200ms ease, box-shadow 200ms ease;
+  animation: aiglow 3.2s ease-in-out infinite;
+}
+.ai-fab:hover { transform: translateY(-2px) scale(1.02); }
+@keyframes aiglow {
+  0%, 100% { box-shadow: 0 10px 30px -10px var(--series-1), 0 0 0 1px rgba(255,255,255,.25) inset; }
+  50% { box-shadow: 0 14px 40px -8px #1baf7a, 0 0 0 1px rgba(255,255,255,.35) inset; }
+}
+.ai-panel {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  border-left: 1px solid var(--glass-line);
+  box-shadow: -20px 0 60px -20px rgba(0, 0, 0, 0.35);
+  transform: translateX(105%);
+  transition: transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ai-panel-open { transform: none; }
+.ai-orb {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 999px; color: white;
+  background: conic-gradient(from 0deg, var(--series-1), #1baf7a, #6250d6, var(--series-1));
+  animation: spin 6s linear infinite;
+}
+.ai-orb > svg { animation: spin 6s linear infinite reverse; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ai-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; color: white;
+  background: linear-gradient(135deg, var(--series-1), #1baf7a 60%, #6250d6);
+}
+.ai-step { animation: rise 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.ai-dots { display: inline-flex; gap: 3px; }
+.ai-dots i { width: 5px; height: 5px; border-radius: 99px; background: var(--series-1); animation: dot 1.2s ease-in-out infinite; }
+.ai-dots i:nth-child(2) { animation-delay: 0.15s; } .ai-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+.ai-caret > div > :last-child::after, .ai-caret-inline::after {
+  content: ""; display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: -2px;
+  background: var(--series-1); border-radius: 2px; animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.ai-shine {
+  position: relative; overflow: hidden;
+}
+.ai-shine::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: linear-gradient(135deg, var(--series-1), #1baf7a 50%, #6250d6);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude; opacity: .7;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
