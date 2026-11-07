@@ -115,6 +115,8 @@ export interface Evaluation {
   default_model: string;
   coverage: { pairs: number; targets: number; with_date: number; blank: number };
   readme_reference: Record<string, number>;
+  truth?: string;
+  mae_proxy?: Record<string, number>;
   rows: EvalRow[];
   per_cutoff: (EvalRow & { cutoff: string; n: number })[];
 }
