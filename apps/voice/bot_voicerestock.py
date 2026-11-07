@@ -48,7 +48,7 @@ from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.workers.llm.backend_llm_worker import BackendLLMWorker
 from pipecat.workers.runner import WorkerRunner
 
-from vr_core import CallSession, OPEN_STATUSES, suggestion_brief
+from vr_core import CallSession, OPEN_STATUSES, num_words, suggestion_brief
 
 load_dotenv(override=True)
 # Δεύτερο αρχείο ρυθμίσεων μόνο για το VoiceRestock (δεν αγγίζουμε το .env του receptionist).
@@ -67,6 +67,7 @@ MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "2"))
 RING_TIMEOUT_SECONDS = int(os.getenv("VOICE_RING_TIMEOUT", "35"))
 SILENCE_RETRY_SECONDS = 5
 CALL_MAX_SECONDS = int(os.getenv("VOICE_CALL_MAX_SECONDS", "420"))
+MAX_SPOKEN = int(os.getenv("VOICE_MAX_SUGGESTIONS", "5"))   # πόσες προτάσεις «ξέρει» ο φωνητικός agent ανά κλήση
 LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "0") == "1"
 GPT_LIVE_VOICE = os.getenv("GPT_LIVE_VOICE", "marin")
 TURN_SHORT_TIMEOUT = float(os.getenv("TURN_SHORT_TIMEOUT", "5.0"))
@@ -145,8 +146,15 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
 """
     open_ = [s for s in session.sugs.values() if s["status"] in OPEN_STATUSES]
     order = {"high": 0, "medium": 1, "low": 2}
-    open_.sort(key=lambda s: (order.get(s["urgency"], 3), s["SUGGESTED_DELIVERY_DATE"]))
-    listing = "\n".join(f"{i}. {suggestion_brief(s)}" for i, s in enumerate(open_, 1)) or "(καμία ανοιχτή πρόταση)"
+    first_out = lambda s: min((l["PREDICTED_DEPLETION_DATE"] or "9999") for l in s["LINES"])  # noqa: E731
+    open_.sort(key=lambda s: (order.get(s["urgency"], 3), first_out(s), s["SUGGESTED_DELIVERY_DATE"]))
+    # Με πραγματικά δεδομένα ένας πωλητής έχει δεκάδες προτάσεις: στο τηλέφωνο μόνο οι πιο επείγουσες.
+    # Οι υπόλοιπες μένουν στο dashboard (και ο server επιτρέπει κάθε πρόταση του πωλητή, αν τη ζητήσει).
+    spoken, rest = open_[:MAX_SPOKEN], len(open_) - MAX_SPOKEN
+    listing = "\n".join(f"{i}. {suggestion_brief(s)}" for i, s in enumerate(spoken, 1)) or "(καμία ανοιχτή πρόταση)"
+    if rest > 0:
+        listing += (f"\n(Υπάρχουν ακόμα {num_words(rest, feminine=True)} λιγότερο επείγουσες προτάσεις. ΔΕΝ τις διαβάζεις· "
+                    "αν ρωτήσει, πες ότι φαίνονται στο dashboard.)")
     who = "Κάνεις ΕΞΕΡΧΟΜΕΝΗ κλήση" if outbound else "Απαντάς σε κλήση"
     start = ("Περίμενε να σου πουν ότι η κλήση απαντήθηκε. Τότε:" if outbound else "Μόλις σου πουν, ξεκίνα:")
     greeting = ("«Καλησπέρα σας, είμαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Σας καλώ για πελάτες σας που κινδυνεύουν\n"
