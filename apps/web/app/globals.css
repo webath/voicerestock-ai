@@ -391,6 +391,53 @@ table.data tbody tr[aria-selected="true"] { background: var(--series-1-wash); }
   -webkit-mask-composite: xor; mask-composite: exclude; opacity: .7;
 }
 
+/* ---------- VORA wordmark: gradient γράμματα, glow από πίσω, λωρίδα φωτός που περνά ----------
+   Το glow είναι στο wrapper και τα γράμματα στο .vora-word: με background-clip:text το γέμισμα ΕΙΝΑΙ το background,
+   οπότε ένα ::before με z-index:-1 στο ίδιο στοιχείο θα ζωγραφιζόταν πάνω από τα γράμματα και θα τα θόλωνε. */
+.vora-mark {
+  --vora-a: var(--series-1); --vora-b: #14a06e; --vora-c: #6250d6;
+  --vora-glow-a: rgba(42, 120, 214, 0.22); --vora-glow-b: rgba(27, 175, 122, 0.16);
+  --vora-halo: rgba(42, 120, 214, 0.3); --vora-halo-2: rgba(27, 175, 122, 0.22); --vora-shine: rgba(255, 255, 255, 0.85);
+  position: relative; isolation: isolate; display: inline-flex;
+}
+.vora-mark::before {            /* το «φως» πίσω από τα γράμματα */
+  content: ""; position: absolute; inset: -12px -18px; z-index: -1; border-radius: 999px; pointer-events: none;
+  background: radial-gradient(closest-side, var(--vora-glow-b), var(--vora-glow-a) 55%, transparent);
+  filter: blur(8px);
+  animation: vora-breathe 4.2s ease-in-out infinite;
+}
+.vora-word {
+  position: relative; display: inline-block;
+  font-size: 1.45rem; font-weight: 800; letter-spacing: 0.14em; line-height: 1; padding: 2px 0 2px 0.14em;
+  background: linear-gradient(100deg, var(--vora-a), var(--vora-b) 35%, var(--vora-c) 65%, var(--vora-a));
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 3px var(--vora-halo)) drop-shadow(0 0 14px var(--vora-halo-2));
+  animation: vora-flow 9s linear infinite;
+}
+.vora-word::after {             /* λωρίδα φωτός που σαρώνει τα γράμματα */
+  content: attr(data-text); position: absolute; inset: 0; padding: inherit; pointer-events: none;
+  background: linear-gradient(100deg, transparent 42%, var(--vora-shine) 50%, transparent 58%);
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: vora-sweep 5.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+:root[data-theme="dark"] .vora-mark {
+  --vora-a: #74b6ff; --vora-b: #3ee6a8; --vora-c: #a993ff;
+  --vora-glow-a: rgba(116, 182, 255, 0.5); --vora-glow-b: rgba(62, 230, 168, 0.38);
+  --vora-halo: rgba(116, 182, 255, 0.85); --vora-halo-2: rgba(62, 230, 168, 0.6); --vora-shine: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .vora-mark {
+    --vora-a: #74b6ff; --vora-b: #3ee6a8; --vora-c: #a993ff;
+    --vora-glow-a: rgba(116, 182, 255, 0.5); --vora-glow-b: rgba(62, 230, 168, 0.38);
+    --vora-halo: rgba(116, 182, 255, 0.85); --vora-halo-2: rgba(62, 230, 168, 0.6); --vora-shine: #fff;
+  }
+}
+@keyframes vora-flow { to { background-position: -220% 0; } }
+@keyframes vora-breathe { 0%, 100% { opacity: 0.55; transform: scale(0.94); } 50% { opacity: 1; transform: scale(1.06); } }
+@keyframes vora-sweep { 0%, 55% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

@@ -26,6 +26,7 @@ from .campaigns import Campaigns
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
 from .market import MarketScanner
+from .simulate import Busy, CallSimulator, NoSuggestion
 from . import outreach
 from .store import PROCESSED, ROOT, Store
 
@@ -101,9 +102,14 @@ class CallEvent(BaseModel):
     erp_draft_id: str | None = None
 
 
+class SimulateBody(BaseModel):
+    salesman: int | None = None
+    suggestion_id: str | None = None
+
+
 def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent: AgentRunner | None = None,
                market: MarketScanner | None = None, campaign_state: outreach.CampaignState | None = None,
-               sms: outreach.Apifon | None = None) -> FastAPI:
+               sms: outreach.Apifon | None = None, sim_pace: float | None = None) -> FastAPI:
     app = FastAPI(title="VORA App API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.state.store = store or Store()
@@ -312,6 +318,26 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
     def call_event(ev: CallEvent):
         S().call_event(ev.model_dump())
         return {"ok": True}
+
+    # ---------------- προσομοίωση κλήσης (demo· μόνο dashboard) ----------------
+    SIM = "voice:sim"
+    app.state.sim = CallSimulator(lambda: S().all(), {
+        "event": lambda ev: S().call_event({"type": None, "role": None, "text": None, "salesman": None,
+                                            "suggestion_id": None, "erp_draft_id": None, "status": None, **ev}),
+        "change_qty": lambda sid, mtrl, q, v: change_qty(sid, mtrl, QtyBody(qty=q, version=v), x_actor=SIM),
+        "confirm": lambda sid, v: confirm(sid, ConfirmBody(version=v), x_actor=SIM)["confirmation_token"],
+        "create_draft": lambda sid, tok, idem: create_draft(sid, DraftBody(confirmation_token=tok, idempotency_key=idem), x_actor=SIM),
+    }, pace=sim_pace)
+
+    @app.post("/api/calls/simulate", status_code=202)
+    def simulate_call(body: SimulateBody | None = None):
+        body = body or SimulateBody()
+        try:
+            return app.state.sim.start(body.salesman, body.suggestion_id)
+        except Busy:
+            raise ApiError(409, "sim_running", "τρέχει ήδη μια προσομοίωση κλήσης")
+        except NoSuggestion as e:
+            raise ApiError(409, "no_suggestion", str(e))
 
     # ---------------- AI βοηθός (μόνο ανάγνωση) ----------------
     data = ai.Data(suggestions=lambda: S().all(), forecasts=_forecasts, customers=_customers,
