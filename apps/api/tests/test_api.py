@@ -146,7 +146,8 @@ def test_new_forecast_run_reloads_proposals(tmp_path):
     data = json.loads(seed.read_text(encoding="utf-8")); data["suggestions"][0]["REASON"] = "νέο τρέξιμο"
     seed.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     fresh = Store(tmp_path / "s.sqlite", seed)                                     # νέο seed → reload
-    assert fresh.get(sid)["status"] == "proposed"
+    assert fresh.get(sid)["status"] == "cancelled"  # ρητή ακύρωση πωλητή δεν ανατρέπεται από forecast
+    assert fresh.get(sid)["forecast_update_available"] is True
 
 
 def test_idempotency_key_is_scoped_to_suggestion(env):
@@ -271,7 +272,9 @@ def test_agent_reloads_when_suggestions_change(tmp_path, monkeypatch):
     c.post("/api/agent/run")
     st = wait_agent(c)
     assert st["last"]["steps"]["handoff"]["metrics"] == {**st["last"]["steps"]["handoff"]["metrics"], "reloaded": True, "suggestions": 5}
-    assert len(c.get("/api/suggestions").json()) == 5
+    rows = c.get("/api/suggestions").json()
+    assert sum(s.get("forecast_active", True) for s in rows) == 5
+    assert all(s["status"] == "cancelled" for s in rows if s.get("forecast_active") is False)
 
 
 def test_agent_conflict_and_failure(tmp_path, monkeypatch):

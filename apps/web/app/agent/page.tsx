@@ -5,6 +5,7 @@ import { Card, ErrorBox, Loading, PageHeader, StatTile } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { ApiError, apiPost, useApi, usePolling, type AgentRun, type AgentState, type AgentStep } from "@/lib/api";
 import { fmtEur, fmtNum } from "@/lib/format";
+import { OperationsSummary } from "@/components/OperationsSummary";
 
 // Owner: Δημήτρης. Δεδομένα: GET /api/agent (poll), POST /api/agent/run. Ο agent: services/forecast/src/forecast/agent.py.
 
@@ -55,6 +56,7 @@ export default function AgentPage() {
           {running ? <><span className="ai-dots" aria-hidden><i /><i /><i /></span> Τρέχει…</> : "▶ Τρέξε τον agent τώρα"}
         </button>
       </PageHeader>
+      <OperationsSummary />
 
       <div className="reveal grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Τελευταία εκτέλεση" value={run ? when(run.started_at) : "–"}
@@ -89,7 +91,7 @@ export default function AgentPage() {
               <li><strong className="text-ink">Δεν παραγγέλνει μόνος του.</strong> Ετοιμάζει προτάσεις· draft στο ERP γίνεται μόνο όταν εγκρίνει ο πωλητής (dashboard ή φωνή), μία φορά, με token.</li>
               <li><strong className="text-ink">Ελέγχει πριν δείξει.</strong> Κάθε πρόταση περνά από τους κανόνες του ERP: γνωστός πελάτης & είδη, ποσότητα &gt; 0, παράδοση σε εργάσιμη και πριν την εξάντληση.</li>
               <li><strong className="text-ink">Σταματά αν κάτι χαλάσει.</strong> Αν το backtest ξεπεράσει το όριο λάθους, δεν δημοσιεύει τίποτα και μένουν οι προηγούμενες προτάσεις.</li>
-              <li><strong className="text-ink">Κρατά τη δουλειά του πωλητή.</strong> Αν οι προτάσεις δεν αλλάξουν, οι εγκρίσεις και τα drafts μένουν ως έχουν.</li>
+              <li><strong className="text-ink">Κρατά τη δουλειά του πωλητή.</strong> Ιστορικό και drafts διατηρούνται. Αλλαγμένη πρόταση χρειάζεται νέα έγκριση· έγκυρες αλλαγές ποσότητας μένουν.</li>
             </ul>
           </Card>
           <Card title="Ιστορικό">

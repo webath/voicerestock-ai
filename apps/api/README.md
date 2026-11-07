@@ -23,3 +23,13 @@ uv run pytest                       # 7 tests (fake ERP, χωρίς δίκτυο
 - Αποτυχία ERP → `status: failed` (502), ξαναδοκιμάζεται με νέο idempotency key.
 - Όλα τα writes στο `GET /api/audit` με `X-Actor`.
 - `POST /api/admin/reset` ξαναφορτώνει τις προτάσεις από το forecast (για «Run demo scenario»).
+
+### Ανανέωση και αποδεικτικό διαδρομής
+
+Ο agent συμφιλιώνει κάθε πρόταση με την προηγούμενη πρόβλεψη (`forecast_seeds`), διατηρώντας drafts, idempotency, κλήσεις και audit.
+Αλλαγμένη ανοιχτή πρόταση απαιτεί νέα έγκριση. Παλιά βάση μεταφέρεται αυτόματα χωρίς reset.
+`GET /api/operations` δίνει πραγματικές καταγραφές drafts/κλήσεων και αλλαγές τελευταίας ανανέωσης.
+`GET /api/suggestions/{id}/trace` δίνει evidence και χρονολόγιο με snapshots σε κάθε νέα καταγραφή.
+Παλιές καταγραφές χωρίς snapshot παραμένουν ως έχουν. Μην παρουσιάζετε την αξία drafts ως πραγματοποιημένο τζίρο.
+
+Έλεγχοι: `uv run pytest` (χρειάζονται πρώτα τα παραγόμενα `data/processed`, βλ. quickstart).

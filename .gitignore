@@ -12,6 +12,7 @@ node_modules/
 .next/
 dist/
 # runtime outputs
+/work/
 team_pack/draft_orders/
 data/processed/
 *.sqlite

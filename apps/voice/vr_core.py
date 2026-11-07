@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import unicodedata
 from datetime import date
 from typing import Any, Awaitable, Callable, Optional
 
@@ -273,6 +274,27 @@ Request = Callable[..., Awaitable["tuple[int, Any]"]]   # (method, path, body=No
 _now = time.monotonic
 
 
+def speech_text(text: str) -> str:
+    """Σύγκριση ελληνικών transcripts χωρίς τόνους, σημεία στίξης ή πολλαπλά κενά."""
+    plain = "".join(c for c in unicodedata.normalize("NFD", (text or "").lower()) if not unicodedata.combining(c))
+    return " ".join(re.findall(r"\w+", plain.replace("ς", "σ")))
+
+
+def confirmation_intent(text: str) -> str:
+    """Συντηρητικός έλεγχος: μόνο ξεκάθαρη επιβεβαίωση χωρίς αλλαγές/όρους περνάει."""
+    t = speech_text(text)
+    words = set(t.split())
+    if words & {"οχι", "μη", "μην", "δεν", "ακυρο", "ακυρωσε", "σταματα"}:
+        return "reject"
+    if words & {"αλλα", "αν", "περιμενε", "αργοτερα", "ισωσ", "αλλαξε", "καντα", "βαλε", "ποσοτητα"} or re.search(r"\d", t):
+        return "change"
+    allowed = {"ναι", "επιβεβαιωνω", "σωστα", "ενταξει", "προχωρα", "προχωρησε", "προχωρηστε", "καν", "καντε", "το", "την", "τη", "παραγγελια", "draft", "επιβεβαιωση", "ευχαριστω", "παρακαλω", "ακριβωσ"}
+    if not words or ";" in text or "?" in text or ";" in text:
+        return "unclear"
+    explicit = words & {"ναι", "επιβεβαιωνω", "σωστα", "προχωρα", "προχωρησε", "προχωρηστε"}
+    return "confirm" if explicit and words <= allowed else "unclear"
+
+
 class CallSession:
     """Μία τηλεφωνική κλήση με έναν πωλητή. Ό,τι επιστρέφουν οι μέθοδοι πάει στο LLM (backend)."""
 
@@ -297,33 +319,57 @@ class CallSession:
         self.prepared_at: dict = {}          # id -> χρόνος του prepare_order
         self.readback_at: Optional[float] = None   # πότε τελείωσε η τελευταία ολοκληρωμένη περίληψη
         self.user_at: Optional[float] = None       # πότε μίλησε τελευταία ο πωλητής
+        self.user_text = ""
+        self.prepared_say: dict = {}
+        self.readbacks: dict = {}
+        self.speaking = False
+        self.interrupted = False
+
+    def note_agent_started(self):
+        self.speaking = True
+        self.interrupted = False
 
     # ---- τι ειπώθηκε (από τους observers της φωνής) ----
     def note_agent(self, text: str, at: Optional[float] = None):
         """Μια ΟΛΟΚΛΗΡΩΜΕΝΗ φράση της βοηθού (BotStoppedSpeaking). Περίληψη = στην ΙΔΙΑ φράση και η ερώτηση
         «Επιβεβαιώνετε…» και η παράδοση (το τέλος της). Κομμένη περίληψη δεν έχει την παράδοση → δεν μετράει."""
-        t = (text or "").lower()
-        if "επιβεβαιών" in t and "παράδοση" in t:
-            self.readback_at = at if at is not None else _now()
+        self.speaking = False
+        if self.interrupted:
+            self.interrupted = False
+            return
+        t = speech_text(text)
+        for sid, expected in self.prepared_say.items():
+            if speech_text(expected) in t:
+                self.readback_at = at if at is not None else _now()
+                self.readbacks[sid] = self.readback_at
 
     def note_user(self, text: str, at: Optional[float] = None):
         if (text or "").strip():
             self.user_at = at if at is not None else _now()
+            self.user_text = text
+            if self.speaking:
+                self.interrupted = True
+                self.readbacks.clear()   # διακοπή: απαιτείται πλήρης νέα περίληψη
 
     async def _heard_and_answered(self, sid: str) -> Optional[str]:
         """None αν επιτρέπεται το write, αλλιώς ο λόγος (οδηγία για τη βοηθό)."""
         if not self.speech_guard:
             return None
         prep = self.prepared_at.get(sid, 0)
-        if self.readback_at is None or self.readback_at < prep:
+        readback = self.readbacks.get(sid)
+        if self.speaking or readback is None or readback < prep:
             return ("Η περίληψη ΔΕΝ ακούστηκε ολόκληρη. Διάβασε ξανά ΟΛΟΚΛΗΡΗ την περίληψη του prepare_order, "
                     "μέχρι και την παράδοση, και περίμενε απάντηση. Δεν δημιουργήθηκε τίποτα.")
         deadline = _now() + self.USER_GRACE_S
-        while self.user_at is None or self.user_at <= self.readback_at:
+        while self.user_at is None or self.user_at <= readback:
             if _now() >= deadline:
                 return ("Ο πωλητής δεν απάντησε ΜΕΤΑ την περίληψη. Ρώτα τον ξανά αν επιβεβαιώνει. "
                         "Δεν δημιουργήθηκε τίποτα.")
             await asyncio.sleep(0.1)
+        if confirmation_intent(self.user_text) != "confirm":
+            self.readbacks.pop(sid, None)
+            return ("Η απάντηση δεν είναι καθαρή επιβεβαίωση ή περιέχει άρνηση/αλλαγή. Δεν δημιουργήθηκε τίποτα. "
+                    "Χειρίσου πρώτα την αλλαγή ή την άρνηση. Για draft χρειάζεται νέα πλήρης περίληψη και ρητό ναι.")
         return None
 
     # ---- βοηθητικά ----
@@ -432,6 +478,8 @@ class CallSession:
             return self._err(f"Η πρόταση δεν μπορεί να γίνει παραγγελία (κατάσταση {s['status']}).")
         self.pending[suggestion_id] = s["version"]
         self.prepared_at[suggestion_id] = _now()   # μόνο περίληψη που θα ειπωθεί ΜΕΤΑ από εδώ μετράει
+        self.prepared_say[suggestion_id] = read_back(s)
+        self.readbacks.pop(suggestion_id, None)
         await self.set_status("confirming", suggestion_id=suggestion_id)
         return {"status": "awaiting_confirmation", "say": read_back(s),
                 "message": "Διάβασε το «say» ΟΛΟΚΛΗΡΟ και αυτούσιο, τελείωσε με την ερώτηση και ΣΤΑΜΑΤΑ. "
@@ -457,6 +505,8 @@ class CallSession:
             await self.event(type="status", status="confirming", suggestion_id=suggestion_id,
                              text="Μπλοκαρίστηκε draft: η περίληψη δεν ακούστηκε ολόκληρη πριν το «ναι»")
             return self._err(not_yet, say=read_back(s))
+        if self.speech_guard:
+            await self.event(type="confirmation", role="user", suggestion_id=suggestion_id, text=self.user_text)
         code, conf = await self.req("POST", f"/api/suggestions/{suggestion_id}/confirm", {"version": version})
         if code != 200 or not conf.get("confirmation_token"):
             return self._err("Η επιβεβαίωση απέτυχε στο σύστημα. Δεν δημιουργήθηκε draft.")

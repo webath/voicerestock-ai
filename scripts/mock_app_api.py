@@ -7,11 +7,14 @@
     python3 scripts/mock_app_api.py [--port 8000]
 """
 import argparse, copy, hashlib, json, os, re, secrets, time, urllib.request, urllib.error
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from urllib.parse import urlparse, parse_qs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'apps', 'api'))
+from app.activity import operations, trace
 FIXTURE = os.path.join(ROOT, 'fixtures', 'suggestions.sample.json')
 ERP = os.environ.get('ERP_BASE_URL', 'http://localhost:8080').rstrip('/')
 URG = {'high': 0, 'medium': 1, 'low': 2}
@@ -97,7 +100,8 @@ def days_between(a, b):
 
 
 def audit(actor, action, sid, outcome):
-    AUDIT.append({'at': now(), 'actor': actor, 'action': action, 'suggestion_id': sid, 'outcome': outcome})
+    AUDIT.append({'at': now(), 'actor': actor, 'action': action, 'suggestion_id': sid, 'outcome': outcome,
+                  'snapshot': copy.deepcopy(SUGS.get(sid)), 'sequence': len(AUDIT) + 1})
     print(f"[audit] {actor} {action} {sid} -> {outcome}")
 
 
@@ -141,6 +145,13 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}; p = u.path.rstrip('/')
         if p == '/api/health': return self.send(200, {'ok': True, 'mock': True})
+        if p == '/api/operations':
+            return self.send(200, operations([with_value(s) for s in SUGS.values()], list(CALLS.values()), {}))
+        m = re.fullmatch(r'/api/suggestions/([^/]+)/trace', p)
+        if m:
+            sid = m.group(1); s = SUGS.get(sid)
+            if not s: return self.err(404, 'not_found', 'suggestion not found')
+            return self.send(200, trace(s, [e for e in AUDIT if e['suggestion_id'] == sid], list(CALLS.values())))
         if p == '/api/salesmen':
             return self.send(200, [{'PRSN': i, 'NAME': n, 'phone': os.environ.get(f'SALESMAN_{i}_PHONE')}
                                    for i, n in sorted(SALESMEN.items())])
@@ -215,7 +226,8 @@ class H(BaseHTTPRequestHandler):
                                            'started_at': now(), 'ended_at': None, 'transcript': [], 'erp_draft_ids': []})
                 if b.get('status'): c['status'] = b['status']
                 if b.get('status') in ('ended', 'failed', 'cancelled'): c['ended_at'] = now()
-                if b.get('text'): c['transcript'].append({'role': b.get('role', 'agent'), 'text': b['text'], 'at': now()})
+                if b.get('text'): c['transcript'].append({'role': b.get('role', 'agent'), 'text': b['text'], 'at': now(),
+                                                        'type': b.get('type'), 'suggestion_id': b.get('suggestion_id')})
                 if b.get('suggestion_id') and b['suggestion_id'] not in c['suggestion_ids']: c['suggestion_ids'].append(b['suggestion_id'])
                 if b.get('erp_draft_id'): c['erp_draft_ids'].append(b['erp_draft_id'])
             return self.send(200, {'ok': True})

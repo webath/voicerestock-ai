@@ -63,6 +63,27 @@ export interface Suggestion {
   erp_draft_id: string | null;
   updated_at: string;
   VALUE?: number;        // € καθαρά, Σ LINE_VALUE
+  forecast_active?: boolean;
+  forecast_update_available?: boolean;
+  forecast_withdrawn?: boolean;
+}
+
+export interface ForecastChanges {
+  new?: number; changed?: number; unchanged?: number; withdrawn?: number; handled?: number;
+  at?: string; ids?: string[];
+}
+export interface Operations {
+  open: number; drafts: number; modified_drafts: number; draft_value_eur: number;
+  calls: number; timed_calls: number; average_call_seconds: number | null;
+  changes: ForecastChanges; value_basis: string;
+}
+export interface OrderEvent {
+  at: string; actor: string; action: string; outcome: string; snapshot: Suggestion | null;
+}
+export interface OrderTrace {
+  suggestion_id: string; status: string; erp_draft_id: string | null;
+  evidence: Pick<SuggestionLine, "MTRL" | "ITEM_NAME" | "UNIT" | "QTY_RECOMMENDED" | "QTY1" | "PREDICTED_DEPLETION_DATE" | "evidence">[];
+  events: OrderEvent[];
 }
 
 export interface Customer {

@@ -71,6 +71,12 @@ class Words(unittest.TestCase):
         self.assertEqual(core.euro_words(1275.6), "χίλια διακόσια εβδομήντα έξι ευρώ")
         self.assertEqual(core.euro_words(12502.4), "δώδεκα χιλιάδες πεντακόσια δύο ευρώ")
 
+    def test_confirmation_requires_unconditional_affirmative(self):
+        for text in ("Ναι", "Ναι, επιβεβαιώνω.", "Σωστά, προχωρήστε", "Ναι, ναι, κάν' το", "Επιβεβαιώνω την παραγγελία"):
+            self.assertEqual(core.confirmation_intent(text), "confirm", text)
+        for text in ("Όχι", "Ναι αλλά κάν' τα έξι", "Ναι, βάλε 15", "Περίμενε", "Θα το δω αργότερα", "ναι;", "μμ", "Ναι αν προλάβουμε", "Δεν επιβεβαιώνω", "Είναι σωστά;"):
+            self.assertNotEqual(core.confirmation_intent(text), "confirm", text)
+
     def test_read_back_long_order_is_compact_but_keeps_changes(self):
         def line(m, q, rec=None):
             return {"MTRL": m, "ITEM_NAME": f"Είδος {m}", "UNIT": "ΚΙΒ", "QTY1": q, "QTY_RECOMMENDED": rec if rec is not None else q}
@@ -229,6 +235,60 @@ class Flow(unittest.TestCase):
         r = self.run_(go())
         self.assertEqual(r["status"], "error")
         self.assertEqual(self.drafts(), [])
+
+    def test_speech_guard_rejects_refusal_correction_and_wrong_readback(self):
+        async def go():
+            s = core.CallSession(self._req, self.sug["SALESMAN"], "GUARD-REFUSE", speech_guard=True)
+            s.USER_GRACE_S = 0
+            sid = self.sug["id"]
+            prep = await s.prepare_order(sid)
+            # Λέξεις-κλειδιά μόνες τους δεν αποδεικνύουν πλήρη περίληψη.
+            s.note_agent("Επιβεβαιώνετε; Η παράδοση θα γίνει μετά.")
+            s.note_user("Ναι")
+            self.assertEqual((await s.place_draft_order(sid))["status"], "error")
+            s.note_agent(prep["say"])
+            for answer in ("Όχι", "Ναι, αλλά κάν' τα έξι", "Περίμενε", "μμ", "Ναι;"):
+                s.note_agent(prep["say"])
+                s.note_user(answer)
+                self.assertEqual((await s.place_draft_order(sid))["status"], "error", answer)
+                self.assertEqual(self.drafts(), [])
+            s.note_agent(prep["say"])
+            s.note_user("Ναι, επιβεβαιώνω")
+            self.assertEqual((await s.place_draft_order(sid))["status"], "draft_created")
+        self.run_(go())
+
+    def test_interrupted_readback_requires_fresh_complete_readback(self):
+        async def go():
+            s = core.CallSession(self._req, self.sug["SALESMAN"], "GUARD-INTERRUPT", speech_guard=True)
+            s.USER_GRACE_S = 0
+            sid = self.sug["id"]
+            prep = await s.prepare_order(sid)
+            s.note_agent_started()
+            s.note_user("Ναι")
+            s.note_agent(prep["say"])  # generated text may contain the whole sentence despite interruption
+            s.note_user("Ναι")
+            self.assertEqual((await s.place_draft_order(sid))["status"], "error")
+            s.note_agent_started(); s.note_agent(prep["say"])
+            s.note_user("Ναι, επιβεβαιώνω")
+            self.assertEqual((await s.place_draft_order(sid))["status"], "draft_created")
+        self.run_(go())
+
+    def test_delayed_confirmation_transcript_is_accepted_within_grace(self):
+        async def go():
+            s = core.CallSession(self._req, self.sug["SALESMAN"], "GUARD-LATE", speech_guard=True)
+            sid = self.sug["id"]
+            prep = await s.prepare_order(sid); s.note_agent(prep["say"])
+            async def delayed():
+                await asyncio.sleep(0.05); s.note_user("Ναι, επιβεβαιώνω")
+            task = asyncio.create_task(delayed())
+            out = await s.place_draft_order(sid)
+            await task
+            self.assertEqual(out["status"], "draft_created")
+            code, trace = await self._req("GET", f"/api/suggestions/{sid}/trace")
+            self.assertEqual(code, 200)
+            self.assertTrue(trace["events"])
+            self.assertEqual((await self._req("GET", "/api/operations"))[1]["drafts"], 1)
+        self.run_(go())
 
     def test_large_quantity_needs_repeat_and_bounds(self):
         async def go():

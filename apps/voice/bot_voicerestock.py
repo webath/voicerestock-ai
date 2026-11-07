@@ -260,6 +260,8 @@ class CallWatch(FrameProcessor):
     async def process_frame(self, frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, BotStartedSpeakingFrame):
+            if self._session:
+                self._session.note_agent_started()
             self._state["spoke"] = True
             if self._state["answered"] and self._session and self._session.status in ("connected", "dialing"):
                 self._session.status = "greeted"
@@ -267,7 +269,7 @@ class CallWatch(FrameProcessor):
         elif isinstance(frame, TTSTextFrame):
             self._said.append(frame.text)
             self._spaces = getattr(frame, "includes_inter_frame_spaces", False)
-        elif isinstance(frame, BotStoppedSpeakingFrame) and self._said:
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             said = " ".join(("" if self._spaces else " ").join(self._said).split())
             self._said.clear()
             logger.info(f"{self._tag} Agent: {said}" if LOG_TRANSCRIPTS else f"{self._tag} Agent μίλησε ({len(said)} χαρ.)")
