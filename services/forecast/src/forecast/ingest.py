@@ -43,8 +43,11 @@ def _csv(name: str) -> pd.DataFrame:
     return pd.read_csv(DATA / name, encoding="utf-8-sig")
 
 
-def load_raw() -> dict[str, pd.DataFrame]:
-    raw = {n: _csv(f"{n}.csv") for n in ("TRDR", "MTRL", "PRSN", "PROMO", "SALDOC", "MTRLINES")}
+def load_raw(erp_tables: dict[str, pd.DataFrame] | None = None) -> dict[str, pd.DataFrame]:
+    """Πίνακες ERP από τα CSV του pack, ή (agent) από το ERP API — βλ. erp_source.fetch().
+    Αργίες και prediction_targets δεν είναι δεδομένα ERP: έρχονται πάντα από το pack."""
+    names = ("TRDR", "MTRL", "PRSN", "PROMO", "SALDOC", "MTRLINES")
+    raw = {n: erp_tables[n].copy() for n in names} if erp_tables else {n: _csv(f"{n}.csv") for n in names}
     raw["holidays"] = _csv("greek_holidays.csv")
     raw["targets"] = _csv("prediction_targets.csv")
     for k, cols in {"TRDR": ["INSDATE"], "PROMO": ["FROMDATE", "TODATE"], "SALDOC": ["TRNDATE"], "holidays": ["DATE"]}.items():
@@ -93,8 +96,8 @@ def to_daily(lines: pd.DataFrame) -> pd.DataFrame:
     return d.rename(columns={"TRNDATE": "DATE"}).sort_values(["TRDR", "MTRL", "DATE"]).reset_index(drop=True)
 
 
-def load() -> Data:
-    raw = load_raw()
+def load(erp_tables: dict[str, pd.DataFrame] | None = None) -> Data:
+    raw = load_raw(erp_tables)
     lines, rep = clean(raw["SALDOC"], raw["MTRLINES"], raw["MTRL"])
     daily = to_daily(lines)
     rep.append(("daily (TRDR, MTRL, DATE) rows", len(daily)))
@@ -103,11 +106,15 @@ def load() -> Data:
                 daily=daily, report=rep)
 
 
-def main() -> None:
-    d = load()
+def write_processed(d: Data) -> None:
     PROCESSED.mkdir(parents=True, exist_ok=True)
     d.lines.to_parquet(PROCESSED / "lines_clean.parquet", index=False)
     d.daily.to_parquet(PROCESSED / "daily.parquet", index=False)
+
+
+def main() -> None:
+    d = load()
+    write_processed(d)
     print("Ingestion report")
     for k, v in d.report:
         print(f"  {k:<36} {v:>8,}")

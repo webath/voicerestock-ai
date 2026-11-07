@@ -3,23 +3,48 @@
 Από ένα τιμολόγιο στο ERP μέχρι ένα draft παραγγελίας που επιβεβαίωσε ο πωλητής στο τηλέφωνο.
 
 ```
- team_pack/ (CSV του ERP)
-      │  ① ingestion & καθαρισμός
+ ⑦ ERP (Mock ERP :8080, SoftOne-style API)
+      │  GET /api/saldoc (τιμολόγια + γραμμές, σελιδοποίηση) · /api/customers · /api/items · /api/promotions
       ▼
- services/forecast ── ② πρόβλεψη εξάντλησης ──▶ submissions/team_*.csv (1.975 γραμμές)
-      │                 ③ suggested orders + evidence
+ ⓪ VORA agent  services/forecast/src/forecast/agent.py   (κάθε πρωί 06:00 · στην εκκίνηση · κουμπί στο dashboard)
+      │  ① καθαρισμός → ② πρόβλεψη εξάντλησης → ③ suggested orders + evidence → έλεγχος κανόνων ERP → αυτοέλεγχος → δημοσίευση
       ▼
- data/processed/*.json ──▶ ④ App API (FastAPI :8000) ──▶ ⑦ Mock ERP :8080  POST /api/draft-orders
-                                 ▲          ▲
-                    ⑤ Dashboard  │          │ ⑥ Voice agent (VPS, μέσω tunnel)
-                    (Next.js :3000)         │    Pipecat + LiveKit SIP → κινητό πωλητή
-                                            │
-                              ⑧ Εξηγήσεις: Claude (claude-opus-5-5), μόνο από το evidence
+ data/processed/*.json + submissions/team_*.csv
+      │
+      ▼
+ ④ App API (FastAPI :8000) ──── μόνο μετά από έγκριση ────▶ ⑦ ERP  POST /api/draft-orders
+      ▲          ▲
+ ⑤ Dashboard     │ ⑥ Voice agent (VPS, μέσω tunnel)
+ (Next.js :3000) │    Pipecat + LiveKit SIP → κινητό πωλητή
+                 │
+   ⑧ Εξηγήσεις & βοηθός: Claude (claude-opus-5-5), μόνο από το evidence
 ```
+
+## ⓪ Ο agent — από τιμολόγια σε Suggested Orders, μόνος του
+
+Αυτό είναι το «Intelligent Agent (middleware)» του challenge: κάθεται ανάμεσα στο ERP και στον πωλητή.
+
+| # | Βήμα | Τι κάνει | Αποτέλεσμα σήμερα |
+|---|---|---|---|
+| 1 | Διάβασμα από το ERP | `GET /api/saldoc` σε σελίδες των 1.000 + πελάτες, είδη, προσφορές (`erp_source.py`). Αν το ERP δεν απαντά → CSV του pack και το γράφει | 25.184 τιμολόγια, 105.757 γραμμές, 26 σελίδες |
+| 2 | Καθαρισμός | ακυρωμένα, υπηρεσίες, πιστωτικά, δώρα (§①) | 362 ακυρωμένα έξω, 457 πιστωτικά |
+| 3 | Πρόβλεψη εξάντλησης | `hybrid_v3` για τα 1.975 ζεύγη (§②) + submission | 1.786 ημερομηνίες, 189 κενά |
+| 4 | Suggested Orders | μία πρόταση ανά πελάτη, ποσότητα, παράδοση, evidence (§③) | 124 προτάσεις, 46.328 € · 35 κρίσιμες |
+| 5 | Έλεγχος με τους κανόνες του ERP | ίδιοι έλεγχοι με το `POST /api/draft-orders` + παράδοση σε εργάσιμη *πριν* την εξάντληση | 124/124 περνούν |
+| 6 | Αυτοέλεγχος ακρίβειας | backtest· αν το MAE > 4 δεν δημοσιεύει (κάτι χάλασε στα δεδομένα) | 2,92 μέρες |
+| 7 | Δημοσίευση | γράφει atomic τα αρχεία για API / dashboard / voice | |
+| 8 | Παράδοση στον πωλητή | το App API φορτώνει τις προτάσεις **μόνο αν άλλαξαν** (αλλιώς κρατά εγκρίσεις και drafts) | |
+
+Όλος ο κύκλος: **~4 δευτερόλεπτα**. Τα ίδια δεδομένα από ERP και από CSV δίνουν **ακριβώς** τα ίδια αποτελέσματα (test).
+**Δεν παραγγέλνει μόνος του:** draft στο ERP γίνεται μόνο όταν εγκρίνει ο πωλητής (dashboard ή φωνή), με token, μία φορά.
+
+Πού τρέχει: `uv run python -m forecast.agent` (CLI) · στην εκκίνηση του `scripts/dev_backend.sh` · κάθε μέρα `AGENT_DAILY_AT`
+(default 06:00) από το App API · κουμπί «Τρέξε τον agent τώρα» στη σελίδα **Agent** (`/agent`), με τα βήματα live
+(`POST /api/agent/run`, `GET /api/agent`, κώδικας `apps/api/app/agent.py`).
 
 ---
 
-## ① Ingestion & καθαρισμός — `services/forecast/src/forecast/ingest.py`
+## ① Ingestion & καθαρισμός — `services/forecast/src/forecast/ingest.py` (+ `erp_source.py`)
 
 Το ERP (σχήμα SoftOne) έχει **headers** (`SALDOC`: ποιος, πότε, τι παραστατικό) και **γραμμές** (`MTRLINES`: είδος, ποσότητα).
 Οι γραμμές *δεν* έχουν ημερομηνία ούτε πελάτη, οπότε:

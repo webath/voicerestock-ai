@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, StrictInt
 
 from . import assistant as ai
+from .agent import AgentRunner
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
 from .store import PROCESSED, ROOT, Store
@@ -73,7 +74,7 @@ class CallEvent(BaseModel):
     erp_draft_id: str | None = None
 
 
-def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> FastAPI:
+def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent: AgentRunner | None = None) -> FastAPI:
     app = FastAPI(title="VORA App API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.state.store = store or Store()
@@ -86,6 +87,25 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> Fas
         return JSONResponse({"error": e.code, "message": e.message}, status_code=e.status)
 
     S = lambda: app.state.store
+
+    def after_agent(run: dict) -> dict:
+        """Ο agent έγραψε νέα αρχεία → φρέσκα caches· νέες προτάσεις μόνο αν άλλαξαν."""
+        for f in (_forecasts, _daily, _customers, _salesman_names, _item_names):
+            f.cache_clear()
+        app.state.ai_cache.clear()
+        changed = S().reload_if_changed()
+        if changed:
+            app.state.explanations.clear()
+        n = len(S().all())
+        S().audit("agent", "agent_run", None, f"{run.get('id')}: {'νέες προτάσεις' if changed else 'χωρίς αλλαγές'}")
+        return {"reloaded": changed, "suggestions": n,
+                "detail": (f"{n} νέες προτάσεις στο dashboard και στον voice agent" if changed else
+                           f"Οι {n} προτάσεις δεν άλλαξαν — εγκρίσεις και drafts μένουν ως έχουν")
+                          + " · draft στο ERP μόνο όταν εγκρίνει ο πωλητής"}
+
+    app.state.agent = agent or AgentRunner(after_agent)
+    if agent is not None and getattr(agent, "on_finish", None) is None:
+        agent.on_finish = after_agent
 
     def must_get(sid: str) -> dict:
         s = S().get(sid)
@@ -294,6 +314,18 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> Fas
         if key not in app.state.ai_cache:
             app.state.ai_cache[key] = ai.customer_message(s, body.channel)
         return app.state.ai_cache[key]
+
+    # ---------------- agent ----------------
+    @app.get("/api/agent")
+    def agent_state():
+        return app.state.agent.state()
+
+    @app.post("/api/agent/run", status_code=202)
+    def agent_run():
+        run = app.state.agent.start("manual")
+        if run is None:
+            raise ApiError(409, "agent_running", "ο agent τρέχει ήδη")
+        return run
 
     @app.post("/api/admin/reset")
     def reset(x_actor: str = Header("unknown")):

@@ -7,7 +7,7 @@ import { CallStatusBadge } from "@/components/CallStatus";
 import { Card, ErrorBox, Loading, PageHeader, PriorityBadge, StatTile } from "@/components/ui";
 import { byPriority, priorityOf, priorityReason } from "@/lib/priority";
 import {
-  apiPost, useApi, type Call, type Evaluation, type RiskRow, type Salesman, type Suggestion,
+  apiPost, useApi, type AgentState, type Call, type Evaluation, type RiskRow, type Salesman, type Suggestion,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { CUTOFF, fmt1, fmtDay, fmtDayLong, fmtEur, fmtNum } from "@/lib/format";
@@ -20,6 +20,7 @@ export default function Overview() {
   const calls = useApi<Call[]>("/api/calls");
   const ev = useApi<Evaluation>("/api/evaluation");
   const salesmen = useApi<Salesman[]>("/api/salesmen");
+  const agent = useApi<AgentState>("/api/agent");
   const [resetting, setResetting] = useState(false);
   const toast = useToast();
 
@@ -78,6 +79,8 @@ export default function Overview() {
         subtitle="Ποιοι πελάτες κινδυνεύουν να ξεμείνουν τις επόμενες μέρες, και τι προτείνουμε να τους στείλουμε.">
         <button className="btn btn-ghost" onClick={reset} disabled={resetting}>{resetting ? "Επαναφορά…" : "Επαναφορά demo"}</button>
       </PageHeader>
+
+      {agent.data?.last && <AgentStrip st={agent.data} />}
 
       <div className="reveal mb-6">
         <Briefing salesmen={salesmen.data ?? []} />
@@ -196,5 +199,21 @@ export default function Overview() {
         </Card>
       </div>
     </>
+  );
+}
+
+function AgentStrip({ st }: { st: AgentState }) {
+  const r = st.last!;
+  const inv = r.steps.fetch?.metrics?.invoices as number | undefined;
+  const sug = r.steps.orders?.metrics?.suggestions as number | undefined;
+  const t = new Date(r.started_at).toLocaleTimeString("el-GR", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <Link href="/agent" className="card lift fade-in mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 !rounded-2xl px-4 py-2.5 text-sm text-ink-2">
+      <span aria-hidden style={{ color: r.status === "done" ? "var(--good)" : "var(--critical)" }}>{r.status === "done" ? "✓" : "!"}</span>
+      <span className="font-semibold text-ink">Agent</span>
+      <span>{t} · {r.source === "erp" ? "από το ERP" : "από CSV"}{inv != null && <> · {fmtNum(inv)} τιμολόγια</>}{sug != null && <> → {fmtNum(sug)} προτάσεις</>}</span>
+      {st.schedule && <span className="text-ink-muted">· επόμενη εκτέλεση {st.schedule}</span>}
+      <span className="ml-auto text-ink-muted">Λεπτομέρειες →</span>
+    </Link>
   );
 }

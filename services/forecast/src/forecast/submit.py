@@ -14,8 +14,8 @@ from .backtest import history
 from .models import DEFAULT_MODEL, REGISTRY, components
 
 
-def build(model: str = DEFAULT_MODEL) -> pd.DataFrame:
-    d = load()
+def build(model: str = DEFAULT_MODEL, d=None) -> pd.DataFrame:
+    d = d or load()
     template = pd.read_csv(DATA / "submission_template.csv", encoding="utf-8-sig")
     tg = template[["TRDR", "MTRL"]]
     pred = REGISTRY[model](d, history(d, CUTOFF), tg, CUTOFF)
