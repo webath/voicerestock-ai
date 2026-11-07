@@ -1,5 +1,5 @@
 """
-bot_voicerestock.py — VoiceRestock AI: ο agent ΚΑΛΕΙ τον πωλητή (Account Manager) για τις προτάσεις
+bot_voicerestock.py — VORA (πρώην VoiceRestock AI): ο agent ΚΑΛΕΙ τον πωλητή (Account Manager) για τις προτάσεις
 αναπαραγγελίας των πελατών του και δημιουργεί DRAFT στο ERP μετά από ρητή προφορική επιβεβαίωση.
 
 Τρέχει στο VPS του Νίκου (Pipecat + LiveKit SIP → FreePBX → Intertelecom), στη θέση του bot_safevoice.py.
@@ -48,7 +48,7 @@ from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.workers.llm.backend_llm_worker import BackendLLMWorker
 from pipecat.workers.runner import WorkerRunner
 
-from vr_core import CallSession, OPEN_STATUSES, num_words, suggestion_brief
+from vr_core import CallSession, OPEN_STATUSES, PRIORITY_NOTE, num_words, priority_of, priority_sort_key, suggestion_brief
 
 load_dotenv(override=True)
 # Δεύτερο αρχείο ρυθμίσεων μόνο για το VoiceRestock (δεν αγγίζουμε το .env του receptionist).
@@ -137,7 +137,7 @@ async def salesman_name(salesman: int) -> str:
 def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
     if session is None:
         return f"""\
-Είσαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ Α.Ε. και απαντάς στο τηλέφωνο. Μιλάς ΠΑΝΤΑ Ελληνικά.
+Είσαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ Α.Ε., και απαντάς στο τηλέφωνο. Μιλάς ΠΑΝΤΑ Ελληνικά.
 Αυτή η γραμμή εξυπηρετεί μόνο τους πωλητές της εταιρείας, και ο αριθμός από τον οποίο καλούν δεν
 είναι καταχωρισμένος. Πες το ευγενικά σε 1-2 προτάσεις, και ζήτα από το backend να κλείσει την κλήση.
 Δεν δίνεις καμία πληροφορία για πελάτες ή παραγγελίες.
@@ -145,24 +145,25 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
 {WAITING_RULES}
 """
     open_ = [s for s in session.sugs.values() if s["status"] in OPEN_STATUSES]
-    order = {"high": 0, "medium": 1, "low": 2}
-    first_out = lambda s: min((l["PREDICTED_DEPLETION_DATE"] or "9999") for l in s["LINES"])  # noqa: E731
-    open_.sort(key=lambda s: (order.get(s["urgency"], 3), first_out(s), s["SUGGESTED_DELIVERY_DATE"]))
-    # Με πραγματικά δεδομένα ένας πωλητής έχει δεκάδες προτάσεις: στο τηλέφωνο μόνο οι πιο επείγουσες.
+    # Ίδια σειρά με το «Με ποιους να ξεκινήσεις» του dashboard: κρίσιμο → επείγον → πιθανή απώλεια → …
+    open_.sort(key=priority_sort_key)
+    # Με πραγματικά δεδομένα ένας πωλητής έχει δεκάδες προτάσεις: στο τηλέφωνο μόνο οι πρώτες.
     # Οι υπόλοιπες μένουν στο dashboard (και ο server επιτρέπει κάθε πρόταση του πωλητή, αν τη ζητήσει).
     spoken, rest = open_[:MAX_SPOKEN], len(open_) - MAX_SPOKEN
-    listing = "\n".join(f"{i}. {suggestion_brief(s)}" for i, s in enumerate(spoken, 1)) or "(καμία ανοιχτή πρόταση)"
+    listing = "\n".join(f"{i}. {PRIORITY_NOTE.get(priority_of(s)[0], '')}{suggestion_brief(s)}"
+                        for i, s in enumerate(spoken, 1)) or "(καμία ανοιχτή πρόταση)"
     if rest > 0:
         listing += (f"\n(Υπάρχουν ακόμα {num_words(rest, feminine=True)} λιγότερο επείγουσες προτάσεις. ΔΕΝ τις διαβάζεις· "
                     "αν ρωτήσει, πες ότι φαίνονται στο dashboard.)")
     who = "Κάνεις ΕΞΕΡΧΟΜΕΝΗ κλήση" if outbound else "Απαντάς σε κλήση"
     start = ("Περίμενε να σου πουν ότι η κλήση απαντήθηκε. Τότε:" if outbound else "Μόλις σου πουν, ξεκίνα:")
-    greeting = ("«Καλησπέρα σας, είμαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Σας καλώ για πελάτες σας που κινδυνεύουν\n"
+    greeting = ("«Καλησπέρα σας, είμαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Σας καλώ για πελάτες σας που κινδυνεύουν\n"
                 "   να ξεμείνουν από εμπόρευμα. Έχετε ένα λεπτό;»" if outbound else
-                "«Καλησπέρα σας, είμαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Έχετε πελάτες που κινδυνεύουν να\n"
+                "«Καλησπέρα σας, είμαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Έχετε πελάτες που κινδυνεύουν να\n"
                 "   ξεμείνουν από εμπόρευμα. Θέλετε να τους δούμε;»")
     return f"""\
-Είσαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρεμπορίου τροφίμων και ποτών (τεχνητή νοημοσύνη, όχι
+Λέγεσαι VORA (Voice Ordering & Restock Assistant, προφέρεται «Βόρα») και είσαι η ψηφιακή βοηθός της
+DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρεμπορίου τροφίμων και ποτών (τεχνητή νοημοσύνη, όχι
 άνθρωπος). {who} με έναν πωλητή της εταιρείας (όνομα: {name}) για πελάτες του που κινδυνεύουν
 να ξεμείνουν από εμπόρευμα. Δεν τον αποκαλείς με το όνομα, εκτός αν σου συστηθεί.
 Μιλάς ΠΑΝΤΑ Ελληνικά, στον πληθυντικό ευγενείας, φυσικά και σύντομα: 1-2 προτάσεις κάθε φορά.
@@ -216,7 +217,7 @@ def backend_prompt(session: CallSession | None, name: str) -> str:
         return ("Είσαι το backend μιας φωνητικής βοηθού. Το μόνο σου εργαλείο είναι το end_call: "
                 "κάλεσέ το όταν η βοηθός ζητήσει να κλείσει η κλήση.")
     return f"""\
-Είσαι το backend της φωνητικής βοηθού VoiceRestock. Εκτελείς τα αιτήματά της ΜΟΝΟ με τα εργαλεία σου
+Είσαι το backend της φωνητικής βοηθού VORA. Εκτελείς τα αιτήματά της ΜΟΝΟ με τα εργαλεία σου
 και απαντάς πολύ σύντομα, στα Ελληνικά.
 
 Πωλητής της κλήσης: {name}. Οι προτάσεις του (id | πελάτης | κατάσταση | είδη):
@@ -286,7 +287,7 @@ class UserWatch(CallWatch):
 
 def _token(room_name: str, identity: str) -> str:
     return (api.AccessToken(os.getenv("LIVEKIT_API_KEY"), os.getenv("LIVEKIT_API_SECRET"))
-            .with_identity(identity).with_name("VoiceRestock")
+            .with_identity(identity).with_name("VORA")
             .with_grants(api.VideoGrants(room_join=True, room=room_name)).to_jwt())
 
 

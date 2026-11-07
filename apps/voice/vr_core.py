@@ -196,6 +196,46 @@ def explain_line(line: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Προτεραιότητα — ΙΔΙΑ με το dashboard (apps/web/lib/priority.ts), ώστε η κλήση να ξεκινά από
+# τους ίδιους πελάτες με τη λίστα «Με ποιους να ξεκινήσεις». Το `urgency` του contract δεν αλλάζει.
+# ---------------------------------------------------------------------------
+CUTOFF = "2026-10-31"
+CRITICAL_RATIO = 1.5   # έχει χάσει μισό κύκλο αγορών ή παραπάνω → μάλλον έχει ήδη ξεμείνει
+LOST_RATIO = 3.0       # τρεις κύκλοι χωρίς αγορά → μάλλον τον χάσαμε· θέλει τηλέφωνο, όχι παραγγελία
+PRIORITY_ORDER = {"critical": 0, "high": 1, "lost": 2, "medium": 3, "low": 4}
+
+
+def priority_of(s: dict) -> "tuple[str, Optional[float]]":
+    """(προτεραιότητα, κύκλοι χωρίς αγορά στο χειρότερο είδος)."""
+    worst = None
+    for l in s.get("LINES", []):
+        e = l.get("evidence") or {}
+        if not e.get("last_purchase_date") or not e.get("avg_interval_days"):
+            continue
+        ratio = (_d(CUTOFF) - _d(e["last_purchase_date"])).days / e["avg_interval_days"]
+        worst = ratio if worst is None or ratio > worst else worst
+    r = worst or 0
+    if r >= LOST_RATIO:
+        return "lost", worst
+    if s.get("urgency") == "high" and r >= CRITICAL_RATIO:
+        return "critical", worst
+    return s.get("urgency", "low"), worst
+
+
+def priority_sort_key(s: dict):
+    """Επίπεδο → αξία (€, αν τη δίνει το API) → πρώτη εξάντληση. Όπως το byPriority του dashboard."""
+    first = (s.get("LINES") or [{}])[0].get("PREDICTED_DEPLETION_DATE") or "9999"
+    return (PRIORITY_ORDER.get(priority_of(s)[0], 5), -(s.get("VALUE") or 0), first)
+
+
+PRIORITY_NOTE = {
+    "critical": "ΚΡΙΣΙΜΟ: έχει χάσει τον συνηθισμένο κύκλο αγορών του, πιθανότατα έχει ήδη ξεμείνει. ",
+    "lost": "ΠΙΘΑΝΗ ΑΠΩΛΕΙΑ: δεν αγοράζει εδώ και πολύ καιρό. Πρότεινε στον πωλητή να πάρει τον πελάτη τηλέφωνο· "
+            "μην πιέσεις για παραγγελία. ",
+}
+
+
+# ---------------------------------------------------------------------------
 # Κλήση: τα εργαλεία με τους κανόνες ασφαλείας
 # ---------------------------------------------------------------------------
 Request = Callable[..., Awaitable["tuple[int, Any]"]]   # (method, path, body=None) -> (status, json)
