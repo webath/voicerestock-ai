@@ -1,6 +1,6 @@
 # Πλάνο υλοποίησης & μοιρασιά δουλειάς
 
-**Ομάδα:** Δημήτρης (data & backend) · Νίκος (dashboard & voice agent)
+**Ομάδα:** Δημήτρης (data, backend & dashboard) · Νίκος (voice agent)
 **Παρουσίαση:** Κυριακή 8/11, 15:00 · **Code freeze:** Κυριακή 13:00
 **Χρόνος:** Παρασκευή 6/11 ~19:00 → Κυριακή 13:00 ≈ 30–34 ώρες ενεργής δουλειάς
 
@@ -22,7 +22,7 @@
 Χωρίζουμε στο **HTTP API** (`docs/CONTRACTS.md`):
 
 - **Δημήτρης = από τα δεδομένα μέχρι το API.** Ό,τι παράγει αριθμούς (forecast, ποσότητες, confidence, evidence) και ό,τι γράφει στο ERP.
-- **Νίκος = ό,τι βλέπει ή ακούει ο χρήστης.** Dashboard και voice agent. Και τα δύο είναι *καταναλωτές* του ίδιου API.
+- **Νίκος = voice agent.** Το dashboard (αρχικά δικό του) το ολοκλήρωσε ο Δημήτρης. Και τα δύο είναι *καταναλωτές* του ίδιου API.
 
 Ο Νίκος δουλεύει από την πρώτη στιγμή πάνω σε **fixtures + mock API** (`fixtures/suggestions.sample.json`, `scripts/mock_app_api.py`)
 και αλλάζει στο πραγματικό API στο checkpoint του Σαββάτου. Έτσι κανείς δεν περιμένει τον άλλον.
@@ -39,7 +39,7 @@
 | LLM εξηγήσεις για το dashboard (grounded σε evidence) | **Δημήτρης** | `apps/api/` (`/explanation`) |
 | Αποτελέσματα backtest | **Δημήτρης** | `docs/RESULTS.md` |
 | Dashboard: όλες οι σελίδες (έτοιμες, glass theme) | **Δημήτρης** | `apps/web/` |
-| Voice agent (Twilio, WS, STT/TTS, LLM dialogue, tools, state machine) | **Νίκος** | `apps/voice/` |
+| Voice agent (Pipecat + LiveKit SIP, LLM dialogue, tools, state machine) | **Νίκος** | `apps/voice/` |
 | Mock App API (κρατιέται ίδιο με τα contracts) | **Νίκος** | `scripts/mock_app_api.py` |
 | Contracts (σχήματα JSON, endpoints) | **κοινό** — αλλαγή μόνο με PR & ok και από τους δύο | `docs/CONTRACTS.md`, `fixtures/` |
 | Pitch / demo script | κοινό | `docs/DEMO.md` |
@@ -77,7 +77,7 @@
 
 **Νίκος**
 - [x] Σελίδα **At Risk** (Δημήτρης) (`GET /api/risk`, `GET /api/suggestions`) με φίλτρα πωλητή / κατηγορίας / περιοχής / urgency
-- [ ] `apps/voice`: Node + TypeScript + Fastify, TwiML endpoint, WebSocket για ConversationRelay, LLM loop με tool calling πάνω στο mock
+- [x] `apps/voice`: Pipecat + LiveKit SIP (αντί για Twilio), LLM με εργαλεία — `apps/voice/README.md`
 - [x] Ο agent διαβάζει μια πρόταση από το fixture και την περιγράφει στα ελληνικά στο τηλέφωνο
 
 ### Φάση 2 — Καλύτερο μοντέλο, πραγματικό API, πλήρεις ροές (Σαβ 09:00–14:00)
@@ -93,9 +93,9 @@
 
 **Νίκος**
 - [x] Σελίδα **Suggested Orders** (Δημήτρης): αλλαγή ποσότητας, «Έγκριση» (confirm → create-draft) → δείχνει το ERP draft id
-- [ ] Voice: όλα τα tools, state machine κλήσης, διπλή προφορική επιβεβαίωση, εξήγηση **μόνο** από το `evidence`
+- [x] Voice: όλα τα tools, state machine κλήσης, διπλή προφορική επιβεβαίωση, εξήγηση **μόνο** από το `evidence` — ελέγχθηκε πάνω στο πραγματικό API (`scripts/check_voice_vs_api.py`)
 
-### 🔗 Checkpoint integration (Σαβ 14:00)
+### 🔗 Checkpoint integration (Σαβ 14:00) — ✅ Σάββατο πρωί: voice agent ⇄ πραγματικό API ⇄ dashboard
 > ✅ Το πραγματικό API είναι έτοιμο από Παρασκευή βράδυ: `./scripts/dev_backend.sh` (pipeline + ERP :8080 + API :8000). Ο Νίκος μπορεί να αλλάξει από το mock όποτε θέλει.
 - Ο Δημήτρης έχει το πραγματικό API στο `:8000` με τα ίδια σχήματα με το fixture
 - Ο Νίκος σταματάει το mock → dashboard και voice δουλεύουν με πραγματικές προβλέψεις

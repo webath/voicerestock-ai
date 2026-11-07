@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { CALL_STEPS, CallStatusBadge, isLive, stepIndex } from "@/components/CallStatus";
 import { Card, EmptyState, ErrorBox, Loading, PageHeader, Select } from "@/components/ui";
-import { apiPost, usePolling, useApi, VOICE_URL, type Call, type Salesman, type Suggestion } from "@/lib/api";
+import { apiPost, usePolling, useApi, VOICE_TOKEN, VOICE_URL, type Call, type Salesman, type Suggestion } from "@/lib/api";
 import { fmtNum } from "@/lib/format";
 
 const time = new Intl.DateTimeFormat("el-GR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -23,12 +23,15 @@ export default function VoicePage() {
   const names = new Map((salesmen.data ?? []).map((s) => [s.PRSN, s.NAME]));
   const pending = new Map<number, number>();
   for (const s of sugs.data ?? []) if (s.status !== "draft_created" && s.status !== "cancelled") pending.set(s.SALESMAN, (pending.get(s.SALESMAN) ?? 0) + 1);
-  const selected = who || String(salesmen.data?.[0]?.PRSN ?? "");
+  // Προεπιλογή: πωλητής με τηλέφωνο, αλλιώς ο 105 του demo, αλλιώς ο πρώτος.
+  const list = salesmen.data ?? [];
+  const fallback = list.find((s) => s.phone) ?? list.find((s) => s.PRSN === 105) ?? list[0];
+  const selected = who || String(fallback?.PRSN ?? "");
 
   async function dial() {
     setDialing(true); setMsg(null);
     try {
-      await apiPost("/voice/calls", { salesman: Number(selected) }, VOICE_URL);
+      await apiPost("/voice/calls", { salesman: Number(selected) }, VOICE_URL, VOICE_TOKEN ? { "X-Voice-Token": VOICE_TOKEN } : {});
       setMsg({ ok: true, text: "Η κλήση ξεκίνησε — θα εμφανιστεί παρακάτω σε λίγα δευτερόλεπτα." });
       calls.reload();
     } catch (e) {

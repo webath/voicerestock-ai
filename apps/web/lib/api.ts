@@ -126,6 +126,8 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export const VOICE_URL = process.env.NEXT_PUBLIC_VOICE_URL ?? "http://localhost:8100";
+/** Προαιρετικό: αν ο voice agent έχει VOICE_TRIGGER_TOKEN, το ίδιο εδώ. */
+export const VOICE_TOKEN = process.env.NEXT_PUBLIC_VOICE_TOKEN ?? "";
 
 export interface CallTurn { role: string; text: string; at: string }
 export interface Call {
@@ -153,10 +155,10 @@ export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 
-export async function apiPost<T>(path: string, body: unknown = {}, base = API_URL): Promise<T> {
+export async function apiPost<T>(path: string, body: unknown = {}, base = API_URL, extraHeaders: Record<string, string> = {}): Promise<T> {
   const r = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Actor": "dashboard" },
+    headers: { "Content-Type": "application/json", "X-Actor": "dashboard", ...extraHeaders },
     body: JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));

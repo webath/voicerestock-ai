@@ -216,7 +216,9 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> Fas
     def create_draft(sid: str, body: DraftBody, x_actor: str = Header("unknown")):
         cid = str(uuid.uuid4())
         with S().lock:
-            if (prev := S().idem_get(body.idempotency_key)) is not None:
+            # Το key ισχύει ΜΟΝΟ για αυτή την πρόταση: το ίδιο key σε άλλη πρόταση δεν επιστρέφει ξένο draft.
+            idem = f"{sid}|{body.idempotency_key}"
+            if (prev := S().idem_get(idem)) is not None:
                 return prev
             s = must_get(sid)
             if s["status"] == "draft_created":
@@ -233,7 +235,7 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None) -> Fas
                 S().put(s)
                 S().drop_tokens(sid)
                 out = {"erp_draft_id": resp["id"], "status": "draft_created"}
-                S().idem_put(body.idempotency_key, out)
+                S().idem_put(idem, out)
                 S().audit(x_actor, "create-draft", sid, resp["id"], cid)
                 return out
             s["status"] = "failed"
