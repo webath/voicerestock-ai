@@ -64,6 +64,41 @@ class Words(unittest.TestCase):
         self.assertEqual(core.spoken_customer("Mini Market Οικονομικό Μ.Ε.Π.Ε."), "Mini Market Οικονομικό")
         self.assertEqual(core.spoken_customer("Ταβέρνα Η Αυλή Α.Ε."), "Ταβέρνα Η Αυλή")
 
+    def test_big_numbers_and_euros(self):
+        self.assertEqual(core.num_words(2000), "δύο χιλιάδες")
+        self.assertEqual(core.num_words(3401), "τρεις χιλιάδες τετρακόσια ένα")
+        self.assertEqual(core.num_words(21000), "είκοσι μία χιλιάδες")
+        self.assertEqual(core.euro_words(1275.6), "χίλια διακόσια εβδομήντα έξι ευρώ")
+        self.assertEqual(core.euro_words(12502.4), "δώδεκα χιλιάδες πεντακόσια δύο ευρώ")
+
+    def test_read_back_long_order_is_compact_but_keeps_changes(self):
+        def line(m, q, rec=None):
+            return {"MTRL": m, "ITEM_NAME": f"Είδος {m}", "UNIT": "ΚΙΒ", "QTY1": q, "QTY_RECOMMENDED": rec if rec is not None else q}
+        s = {"CUSTOMER_NAME": "Ξενοδοχείο Ανατολή Μ.Ε.Π.Ε.", "SUGGESTED_DELIVERY_DATE": "2026-11-02", "VALUE": 1275.6,
+             "LINES": [line(1, 4), line(2, 42), line(3, 4), line(4, 13), line(5, 6), line(6, 2, rec=5), line(7, 1), line(8, 3), line(9, 2)]}
+        rb = core.read_back(s)
+        self.assertIn("δύο κιβώτια", rb)                     # το είδος που άλλαξε ο πωλητής λέγεται ΠΑΝΤΑ
+        self.assertIn("έξι ακόμα είδη στις ποσότητες της πρότασης", rb)
+        self.assertIn("χίλια διακόσια εβδομήντα έξι ευρώ", rb)
+        self.assertNotRegex(rb, r"\d")
+        s["LINES"] = s["LINES"][:3]
+        self.assertNotIn("ακόμα", core.read_back(s))         # μικρή παραγγελία: όλα τα είδη
+
+    def test_priority_matches_dashboard_rules(self):
+        def sug(urgency, last, interval, value=0, dep="2026-11-06"):
+            return {"urgency": urgency, "VALUE": value, "LINES": [{"PREDICTED_DEPLETION_DATE": dep,
+                    "evidence": {"last_purchase_date": last, "avg_interval_days": interval}}]}
+        # CUTOFF 2026-10-31: 15 μέρες από την τελευταία αγορά
+        self.assertEqual(core.priority_of(sug("high", "2026-10-16", 10))[0], "critical")   # 1,5 κύκλος
+        self.assertEqual(core.priority_of(sug("high", "2026-10-16", 11))[0], "high")       # 1,36
+        self.assertEqual(core.priority_of(sug("medium", "2026-10-16", 10))[0], "medium")   # κρίσιμο μόνο αν high
+        self.assertEqual(core.priority_of(sug("medium", "2026-10-01", 10))[0], "lost")     # 3 κύκλοι
+        self.assertEqual(core.priority_of({"urgency": "low", "LINES": [{"evidence": {}}]})[0], "low")
+        ranked = sorted([sug("high", "2026-10-30", 7, 50), sug("medium", "2026-10-01", 10), sug("high", "2026-10-16", 10, 10),
+                         sug("high", "2026-10-30", 7, 90)], key=core.priority_sort_key)
+        self.assertEqual([core.priority_of(s)[0] for s in ranked], ["critical", "high", "high", "lost"])
+        self.assertEqual([s["VALUE"] for s in ranked[1:3]], [90, 50])                      # ίδιο επίπεδο → αξία
+
     def test_no_digits_in_spoken_text(self):
         with open(os.path.join(ROOT, "fixtures", "suggestions.sample.json"), encoding="utf-8") as f:
             fixture = json.load(f)
@@ -160,6 +195,29 @@ class Flow(unittest.TestCase):
         self.assertEqual(body["TRDR"], self.sug["TRDR"])
         self.assertEqual(body["LINES"][0]["QTY1"], self.sug["LINES"][0]["QTY_RECOMMENDED"] + 1)
         self.assertIn("draft_created", [e.get("status") for e in self.events])
+
+    def test_speech_guard_blocks_yes_before_full_readback(self):
+        """Κλήση 7/11: «ναι, κάν' το» ΠΑΝΩ στην περίληψη έφτιαξε draft. Με τον φύλακα: ποτέ."""
+        async def go():
+            s = core.CallSession(self._req, self.sug["SALESMAN"], "CALLGUARD", on_event=self._event, speech_guard=True)
+            s.USER_GRACE_S = 0.2
+            sid = self.sug["id"]
+            prep = await s.prepare_order(sid)
+            s.note_user("Ναι, ναι, κάν' το")                            # πριν ακουστεί η περίληψη
+            s.note_agent("Επιβεβαιώνετε draft παραγγελίας για τον πελάτη … Ice tea τέσσερα κιβώτια, Ένα λεπτάκι.")  # κομμένη
+            r1 = await s.place_draft_order(sid)
+            s.note_agent(prep["say"])                                    # ολόκληρη περίληψη
+            r2 = await s.place_draft_order(sid)                          # ο πωλητής ΔΕΝ μίλησε μετά
+            s.note_user("Ναι, επιβεβαιώνω")
+            r3 = await s.place_draft_order(sid)
+            return r1, r2, r3
+        r1, r2, r3 = self.run_(go())
+        self.assertEqual(r1["status"], "error")
+        self.assertIn("δεν ακούστηκε", r1["message"].lower())
+        self.assertIn("Επιβεβαιώνετε", r1["say"])                         # η βοηθός ξαναδιαβάζει την περίληψη
+        self.assertEqual(r2["status"], "error")
+        self.assertEqual(r3["status"], "draft_created", r3)
+        self.assertEqual(len(self.drafts()), 1)
 
     def test_change_after_readback_blocks_write(self):
         async def go():

@@ -1,5 +1,5 @@
 """
-bot_voicerestock.py — VoiceRestock AI: ο agent ΚΑΛΕΙ τον πωλητή (Account Manager) για τις προτάσεις
+bot_voicerestock.py — VORA (πρώην VoiceRestock AI): ο agent ΚΑΛΕΙ τον πωλητή (Account Manager) για τις προτάσεις
 αναπαραγγελίας των πελατών του και δημιουργεί DRAFT στο ERP μετά από ρητή προφορική επιβεβαίωση.
 
 Τρέχει στο VPS του Νίκου (Pipecat + LiveKit SIP → FreePBX → Intertelecom), στη θέση του bot_safevoice.py.
@@ -48,7 +48,7 @@ from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.workers.llm.backend_llm_worker import BackendLLMWorker
 from pipecat.workers.runner import WorkerRunner
 
-from vr_core import CallSession, OPEN_STATUSES, suggestion_brief
+from vr_core import CallSession, OPEN_STATUSES, PRIORITY_NOTE, num_words, priority_of, priority_sort_key, suggestion_brief
 
 load_dotenv(override=True)
 # Δεύτερο αρχείο ρυθμίσεων μόνο για το VoiceRestock (δεν αγγίζουμε το .env του receptionist).
@@ -67,6 +67,7 @@ MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "2"))
 RING_TIMEOUT_SECONDS = int(os.getenv("VOICE_RING_TIMEOUT", "35"))
 SILENCE_RETRY_SECONDS = 5
 CALL_MAX_SECONDS = int(os.getenv("VOICE_CALL_MAX_SECONDS", "420"))
+MAX_SPOKEN = int(os.getenv("VOICE_MAX_SUGGESTIONS", "5"))   # πόσες προτάσεις «ξέρει» ο φωνητικός agent ανά κλήση
 LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "0") == "1"
 GPT_LIVE_VOICE = os.getenv("GPT_LIVE_VOICE", "marin")
 TURN_SHORT_TIMEOUT = float(os.getenv("TURN_SHORT_TIMEOUT", "5.0"))
@@ -136,7 +137,7 @@ async def salesman_name(salesman: int) -> str:
 def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
     if session is None:
         return f"""\
-Είσαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ Α.Ε. και απαντάς στο τηλέφωνο. Μιλάς ΠΑΝΤΑ Ελληνικά.
+Είσαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ Α.Ε., και απαντάς στο τηλέφωνο. Μιλάς ΠΑΝΤΑ Ελληνικά.
 Αυτή η γραμμή εξυπηρετεί μόνο τους πωλητές της εταιρείας, και ο αριθμός από τον οποίο καλούν δεν
 είναι καταχωρισμένος. Πες το ευγενικά σε 1-2 προτάσεις, και ζήτα από το backend να κλείσει την κλήση.
 Δεν δίνεις καμία πληροφορία για πελάτες ή παραγγελίες.
@@ -144,17 +145,25 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
 {WAITING_RULES}
 """
     open_ = [s for s in session.sugs.values() if s["status"] in OPEN_STATUSES]
-    order = {"high": 0, "medium": 1, "low": 2}
-    open_.sort(key=lambda s: (order.get(s["urgency"], 3), s["SUGGESTED_DELIVERY_DATE"]))
-    listing = "\n".join(f"{i}. {suggestion_brief(s)}" for i, s in enumerate(open_, 1)) or "(καμία ανοιχτή πρόταση)"
+    # Ίδια σειρά με το «Με ποιους να ξεκινήσεις» του dashboard: κρίσιμο → επείγον → πιθανή απώλεια → …
+    open_.sort(key=priority_sort_key)
+    # Με πραγματικά δεδομένα ένας πωλητής έχει δεκάδες προτάσεις: στο τηλέφωνο μόνο οι πρώτες.
+    # Οι υπόλοιπες μένουν στο dashboard (και ο server επιτρέπει κάθε πρόταση του πωλητή, αν τη ζητήσει).
+    spoken, rest = open_[:MAX_SPOKEN], len(open_) - MAX_SPOKEN
+    listing = "\n".join(f"{i}. {PRIORITY_NOTE.get(priority_of(s)[0], '')}{suggestion_brief(s)}"
+                        for i, s in enumerate(spoken, 1)) or "(καμία ανοιχτή πρόταση)"
+    if rest > 0:
+        listing += (f"\n(Υπάρχουν ακόμα {num_words(rest, feminine=True)} λιγότερο επείγουσες προτάσεις. ΔΕΝ τις διαβάζεις· "
+                    "αν ρωτήσει, πες ότι φαίνονται στο dashboard.)")
     who = "Κάνεις ΕΞΕΡΧΟΜΕΝΗ κλήση" if outbound else "Απαντάς σε κλήση"
     start = ("Περίμενε να σου πουν ότι η κλήση απαντήθηκε. Τότε:" if outbound else "Μόλις σου πουν, ξεκίνα:")
-    greeting = ("«Καλησπέρα σας, είμαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Σας καλώ για πελάτες σας που κινδυνεύουν\n"
+    greeting = ("«Καλησπέρα σας, είμαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Σας καλώ για πελάτες σας που κινδυνεύουν\n"
                 "   να ξεμείνουν από εμπόρευμα. Έχετε ένα λεπτό;»" if outbound else
-                "«Καλησπέρα σας, είμαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Έχετε πελάτες που κινδυνεύουν να\n"
+                "«Καλησπέρα σας, είμαι η VORA, η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ. Έχετε πελάτες που κινδυνεύουν να\n"
                 "   ξεμείνουν από εμπόρευμα. Θέλετε να τους δούμε;»")
     return f"""\
-Είσαι η ψηφιακή βοηθός της DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρεμπορίου τροφίμων και ποτών (τεχνητή νοημοσύνη, όχι
+Λέγεσαι VORA (Voice Ordering & Restock Assistant, προφέρεται «Βόρα») και είσαι η ψηφιακή βοηθός της
+DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρεμπορίου τροφίμων και ποτών (τεχνητή νοημοσύνη, όχι
 άνθρωπος). {who} με έναν πωλητή της εταιρείας (όνομα: {name}) για πελάτες του που κινδυνεύουν
 να ξεμείνουν από εμπόρευμα. Δεν τον αποκαλείς με το όνομα, εκτός αν σου συστηθεί.
 Μιλάς ΠΑΝΤΑ Ελληνικά, στον πληθυντικό ευγενείας, φυσικά και σύντομα: 1-2 προτάσεις κάθε φορά.
@@ -168,8 +177,8 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
 === ΠΟΡΕΙΑ ΚΛΗΣΗΣ ===
 {start}
 1. {greeting}
-   (Αν στην αρχή ακούσεις «ναι;», «εμπρός», «παρακαλώ», «λέγετε»: σήκωσε το τηλέφωνο. Πες ΑΜΕΣΩΣ το βήμα 1,
-   όχι «ακούω».)
+   (Αν στην αρχή ακούσεις «ναι;», «έλα», «εμπρός», «παρακαλώ», «λέγετε»: σήκωσε το τηλέφωνο. Πες ΑΜΕΣΩΣ το
+   βήμα 1 και τίποτα πριν από αυτό: όχι «ακούω», όχι «hello», καμία λέξη στα αγγλικά.)
 2. Αν πει ναι: ξεκίνα από τον πρώτο πελάτη της λίστας. Πες τι τελειώνει και πότε, την πρόταση και την
    παράδοση. Αν έχει πολλά είδη, πες πρώτα τα δύο πιο επείγοντα και ότι υπάρχουν κι άλλα.
    Μετά ρώτα: «Θέλετε να σας πω γιατί, ή να την περάσω;»
@@ -177,22 +186,27 @@ def live_prompt(session: CallSession | None, name: str, outbound: bool) -> str:
    - Αλλαγή ποσότητας («κάν' τα δεκαπέντε») → ζήτα από το backend να την αλλάξει και πες το αποτέλεσμα
      όπως σου το δίνει. Αν το backend σου δώσει ερώτηση επιβεβαίωσης του αριθμού, κάνε ΑΚΡΙΒΩΣ αυτή.
    - «Πέρασέ τη» / «φτιάξ' την» / «βάλ' τη σε draft» / «εντάξει, προχώρα» → ζήτα από το backend να ετοιμάσει
-     την επιβεβαίωση. Διάβασε ΟΛΟΚΛΗΡΗ και ΑΥΤΟΥΣΙΑ την περίληψη που σου δίνει (όλα τα είδη), τελείωσε με την
-     ερώτησή της και ΣΤΑΜΑΤΑ να μιλάς. Μην προσθέσεις τίποτα μετά την ερώτηση.
+     την επιβεβαίωση. Διάβασε ΟΛΟΚΛΗΡΗ και ΑΥΤΟΥΣΙΑ την περίληψη που σου δίνει, τελείωσε με την
+     ερώτησή της και ΣΤΑΜΑΤΑ να μιλάς. Μην προσθέσεις τίποτα μετά την ερώτηση. Αν σε διακόψει πριν
+     τελειώσεις, απάντησε σε ό,τι ρώτησε και μετά ξαναρώτα σύντομα αν επιβεβαιώνει.
    - ΜΟΝΟ αν ΜΕΤΑ την περίληψη απαντήσει καθαρά «ναι», «ναι, επιβεβαιώνω» ή «σωστά» → ζήτα από το backend να
      δημιουργήσει το draft. Ό,τι είπε ΠΡΙΝ την περίληψη δεν μετράει ως επιβεβαίωση. Σε ασαφή απάντηση
      («οκ;», «μμ», «ε;») ρώτα ξανά. Αν αλλάξει κάτι, κάνε πρώτα την αλλαγή.
    - ΑΠΑΓΟΡΕΥΕΤΑΙ να πεις «προχωράμε», «θα δημιουργηθεί», «καταχωρήθηκε», «έγινε» ή κάτι παρόμοιο για
      παραγγελία, πριν το backend σου πει ότι το ERP δημιούργησε το draft. Τότε το λες με τα λόγια του backend.
      Αν αποτύχει, λες καθαρά ότι ΔΕΝ δημιουργήθηκε και ότι θα το δει στο dashboard.
-   - «Θα το επιβεβαιώσω αργότερα» / «είμαι στο δρόμο»: πες ότι ΔΕΝ δημιουργήθηκε τίποτα και ότι οι προτάσεις
-     μένουν ανοιχτές στο dashboard για όποτε μπορεί. Μη ζητήσεις ξανά επιβεβαίωση.
+   - «Φτιάξ' το draft και θα το στείλω / θα το κοιτάξω μετά»: ΖΗΤΑ draft. Το draft δεν είναι τελική
+     παραγγελία· η αποστολή γίνεται μετά από το ERP. Κάνε κανονικά περίληψη → «ναι» → draft.
+   - ΜΟΝΟ αν αρνηθεί ή πει ότι θα αποφασίσει αργότερα («όχι τώρα», «θα το δω εγώ μετά», «άσ' το για μετά»):
+     πες ότι ΔΕΝ δημιουργήθηκε τίποτα και ότι η πρόταση μένει ανοιχτή στο dashboard. Μην επιμείνεις.
    - «Πέρασέ τες όλες»: μία-μία, με περίληψη και «ναι» για την καθεμία.
    - «Επόμενο» / «άσ' το» → πήγαινε στον επόμενο πελάτη της λίστας.
 3. Όταν τελειώσει η λίστα ή σου πει ότι φτάνει: σύντομος αποχαιρετισμός, και ζήτα από το backend να κλείσει την κλήση.
 
 === ΚΑΝΟΝΕΣ ===
-- Ποτέ δεν προτείνεις πελάτη ή είδος εκτός λίστας. Δεν δίνεις τιμές, απόθεμα αποθήκης ή υποσχέσεις παράδοσης.
+- Ποτέ δεν προτείνεις πελάτη ή είδος εκτός λίστας. Δεν δίνεις απόθεμα αποθήκης ή υποσχέσεις παράδοσης.
+- Κόστος: λες ΜΟΝΟ την «αξία περίπου … ευρώ σε τιμές καταλόγου» της λίστας ή του backend. Όχι τιμή ανά τεμάχιο,
+  όχι εκπτώσεις· η τελική τιμή φαίνεται στο ERP.
 - Κάτι που δεν ξέρεις: «Δεν μπορώ να το επιβεβαιώσω· θα το δείτε στο dashboard.»
 - Τηλεφωνητής, ή άλλος άνθρωπος από τον πωλητή: πες μόνο ότι θα ξανακαλέσεις, ΧΩΡΙΣ στοιχεία πελατών,
   και ζήτα από το backend να κλείσει την κλήση. Καμία παραγγελία.
@@ -208,7 +222,7 @@ def backend_prompt(session: CallSession | None, name: str) -> str:
         return ("Είσαι το backend μιας φωνητικής βοηθού. Το μόνο σου εργαλείο είναι το end_call: "
                 "κάλεσέ το όταν η βοηθός ζητήσει να κλείσει η κλήση.")
     return f"""\
-Είσαι το backend της φωνητικής βοηθού VoiceRestock. Εκτελείς τα αιτήματά της ΜΟΝΟ με τα εργαλεία σου
+Είσαι το backend της φωνητικής βοηθού VORA. Εκτελείς τα αιτήματά της ΜΟΝΟ με τα εργαλεία σου
 και απαντάς πολύ σύντομα, στα Ελληνικά.
 
 Πωλητής της κλήσης: {name}. Οι προτάσεις του (id | πελάτης | κατάσταση | είδη):
@@ -257,6 +271,8 @@ class CallWatch(FrameProcessor):
             said = " ".join(("" if self._spaces else " ").join(self._said).split())
             self._said.clear()
             logger.info(f"{self._tag} Agent: {said}" if LOG_TRANSCRIPTS else f"{self._tag} Agent μίλησε ({len(said)} χαρ.)")
+            if self._session:
+                self._session.note_agent(said)   # φύλακας: ολοκληρωμένη περίληψη;
             self._post(type="transcript", role="agent", text=said)
         await self.push_frame(frame, direction)
 
@@ -269,6 +285,8 @@ class UserWatch(CallWatch):
         await FrameProcessor.process_frame(self, frame, direction)
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             logger.info(f"{self._tag} Πωλητής: {frame.text}" if LOG_TRANSCRIPTS else f"{self._tag} Πωλητής μίλησε")
+            if self._session:
+                self._session.note_user(frame.text)   # φύλακας: μίλησε ο πωλητής (μετά την περίληψη;)
             self._post(type="transcript", role="user", text=frame.text.strip())
             if self._session and self._session.status == "greeted":
                 self._session.status = "discussing"
@@ -278,7 +296,7 @@ class UserWatch(CallWatch):
 
 def _token(room_name: str, identity: str) -> str:
     return (api.AccessToken(os.getenv("LIVEKIT_API_KEY"), os.getenv("LIVEKIT_API_SECRET"))
-            .with_identity(identity).with_name("VoiceRestock")
+            .with_identity(identity).with_name("VORA")
             .with_grants(api.VideoGrants(room_join=True, room=room_name)).to_jwt())
 
 
@@ -481,7 +499,10 @@ async def cors(request: web.Request, handler):
     resp = web.Response(status=204) if request.method == "OPTIONS" else await handler(request)
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type,X-Voice-Token"
+    # Ό,τι headers ζητά ο browser (π.χ. το dashboard στέλνει X-Actor). Δεν ανοίγει τίποτα: ακούμε μόνο σε 127.0.0.1
+    # και, αν οριστεί, το VOICE_TRIGGER_TOKEN ελέγχεται κανονικά στο POST.
+    resp.headers["Access-Control-Allow-Headers"] = request.headers.get(
+        "Access-Control-Request-Headers", "Content-Type,X-Voice-Token,X-Actor")
     return resp
 
 
@@ -507,7 +528,7 @@ async def http_calls(request: web.Request):
     if len(ACTIVE) >= MAX_CONCURRENT_CALLS or any(r.startswith(f"vr-{salesman}-") for r in ACTIVE):
         return _json(409, {"error": "busy", "message": "Υπάρχει ήδη κλήση σε εξέλιξη"})
     room = f"vr-{salesman}-{int(time.time())}"
-    session = CallSession(api_request(f"voice:{room}"), salesman, room, on_event=post_call_event)
+    session = CallSession(api_request(f"voice:{room}"), salesman, room, on_event=post_call_event, speech_guard=True)
     try:
         open_ = await session.load()
     except Exception as e:
@@ -550,7 +571,8 @@ async def handle_inbound(room_name: str):
                      if digits10(p) and digits10(p) == digits10(phone) and digits10(p) in ALLOWED), None)
     session, name = None, ""
     if salesman is not None:
-        session = CallSession(api_request(f"voice:{room_name}"), salesman, room_name, on_event=post_call_event)
+        session = CallSession(api_request(f"voice:{room_name}"), salesman, room_name, on_event=post_call_event,
+                              speech_guard=True)
         try:
             await session.load()
             name = await salesman_name(salesman)

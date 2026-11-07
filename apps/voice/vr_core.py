@@ -13,7 +13,9 @@ Python 3.9-συμβατό (τα tests τρέχουν και στο Mac με το
 """
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from datetime import date
 from typing import Any, Awaitable, Callable, Optional
 
@@ -33,9 +35,12 @@ UNITS = {"ΚΙΒ": ("κιβώτιο", "κιβώτια"), "ΤΕΜ": ("τεμάχ�
 
 
 def num_words(n: int, feminine: bool = False) -> str:
-    """Ακέραιος 0..1999 σε λέξεις (ουδέτερο, ή θηλυκό για ημέρες του μήνα). Μεγαλύτεροι μένουν ψηφία."""
-    if n < 0 or n >= 2000:
+    """Ακέραιος 0..999.999 σε λέξεις (ουδέτερο, ή θηλυκό για ημέρες/χιλιάδες). Μεγαλύτεροι μένουν ψηφία."""
+    if n < 0 or n >= 1_000_000:
         return str(n)
+    if n >= 2000:
+        th, rest = divmod(n, 1000)
+        return f"{num_words(th, feminine=True)} χιλιάδες" + (f" {num_words(rest, feminine)}" if rest else "")
     if n >= 1000:
         rest = n - 1000
         return "χίλια" + (f" {num_words(rest, feminine)}" if rest else "")
@@ -76,6 +81,11 @@ def spoken_day_month(iso: str) -> str:
 def spoken_date(iso: str) -> str:
     """2026-11-03 → «την Τρίτη τρεις Νοεμβρίου»."""
     return f"{WEEKDAYS_ACC[_d(iso).weekday()]} {spoken_day_month(iso)}"
+
+
+def euro_words(v) -> str:
+    """1275.6 → «χίλια διακόσια εβδομήντα έξι ευρώ» (στρογγυλό ευρώ· τιμές καταλόγου, όχι τελική τιμή)."""
+    return f"{num_words(int(round(float(v))))} ευρώ"
 
 
 def spoken_digits(s: str) -> str:
@@ -145,17 +155,38 @@ def line_brief(line: dict) -> str:
     return f"{spoken_item(line['ITEM_NAME'])}: {ends}· πρόταση {qty_words(line['QTY1'], line['UNIT'])}"
 
 
+def value_phrase(s: dict) -> str:
+    """«, αξία περίπου … ευρώ σε τιμές καταλόγου» — μόνο αν τη δίνει το App API (πεδίο VALUE)."""
+    v = s.get("VALUE")
+    return f", αξία περίπου {euro_words(v)} σε τιμές καταλόγου" if isinstance(v, (int, float)) and v > 0 else ""
+
+
 def suggestion_brief(s: dict) -> str:
     lines = "· ".join(line_brief(l) for l in s["LINES"])
     return (f"{spoken_customer(s['CUSTOMER_NAME'])} ({s['AREA']}): {lines}. "
-            f"Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}.")
+            f"Παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)}.")
+
+
+READ_BACK_FULL = 4   # μέχρι τόσα είδη διαβάζονται όλα· πάνω από αυτό η περίληψη θα κρατούσε μισό λεπτό
 
 
 def read_back(s: dict) -> str:
-    """Η ΑΚΡΙΒΗΣ περίληψη που ακούει ο πωλητής πριν από την επιβεβαίωση."""
-    items = ", ".join(f"{spoken_item(l['ITEM_NAME'])} {qty_words(l['QTY1'], l['UNIT'])}" for l in s["LINES"])
+    """Η περίληψη που επιβεβαιώνει ο πωλητής. Λέει ΠΑΝΤΑ: πελάτη, κάθε είδος που άλλαξε ο πωλητής, παράδοση.
+    Σε μεγάλη πρόταση τα υπόλοιπα είδη λέγονται ως «στις ποσότητες της πρότασης» (ίδια με το dashboard),
+    αλλιώς η κλήση κρατά μισό λεπτό και ο πωλητής διακόπτει (πρώτη κλήση με πραγματικά δεδομένα, 7/11)."""
+    lines = s["LINES"]
+    say = lambda l: f"{spoken_item(l['ITEM_NAME'])} {qty_words(l['QTY1'], l['UNIT'])}"  # noqa: E731
+    if len(lines) <= READ_BACK_FULL:
+        items = ", ".join(say(l) for l in lines)
+    else:
+        changed = [l for l in lines if l["QTY1"] != l.get("QTY_RECOMMENDED", l["QTY1"])]
+        shown = changed + [l for l in lines if l not in changed][: max(0, 3 - len(changed))]
+        rest = len(lines) - len(shown)
+        items = ", ".join(say(l) for l in shown)
+        if rest:
+            items += f", και {'ένα ακόμα είδος' if rest == 1 else num_words(rest) + ' ακόμα είδη'} στις ποσότητες της πρότασης"
     return (f"Επιβεβαιώνετε draft παραγγελίας για τον πελάτη {spoken_customer(s['CUSTOMER_NAME'])}: {items}, "
-            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])};")
+            f"με παράδοση {spoken_date(s['SUGGESTED_DELIVERY_DATE'])}{value_phrase(s)};")
 
 
 def explain_line(line: dict) -> str:
@@ -196,9 +227,50 @@ def explain_line(line: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Προτεραιότητα — ΙΔΙΑ με το dashboard (apps/web/lib/priority.ts), ώστε η κλήση να ξεκινά από
+# τους ίδιους πελάτες με τη λίστα «Με ποιους να ξεκινήσεις». Το `urgency` του contract δεν αλλάζει.
+# ---------------------------------------------------------------------------
+CUTOFF = "2026-10-31"
+CRITICAL_RATIO = 1.5   # έχει χάσει μισό κύκλο αγορών ή παραπάνω → μάλλον έχει ήδη ξεμείνει
+LOST_RATIO = 3.0       # τρεις κύκλοι χωρίς αγορά → μάλλον τον χάσαμε· θέλει τηλέφωνο, όχι παραγγελία
+PRIORITY_ORDER = {"critical": 0, "high": 1, "lost": 2, "medium": 3, "low": 4}
+
+
+def priority_of(s: dict) -> "tuple[str, Optional[float]]":
+    """(προτεραιότητα, κύκλοι χωρίς αγορά στο χειρότερο είδος)."""
+    worst = None
+    for l in s.get("LINES", []):
+        e = l.get("evidence") or {}
+        if not e.get("last_purchase_date") or not e.get("avg_interval_days"):
+            continue
+        ratio = (_d(CUTOFF) - _d(e["last_purchase_date"])).days / e["avg_interval_days"]
+        worst = ratio if worst is None or ratio > worst else worst
+    r = worst or 0
+    if r >= LOST_RATIO:
+        return "lost", worst
+    if s.get("urgency") == "high" and r >= CRITICAL_RATIO:
+        return "critical", worst
+    return s.get("urgency", "low"), worst
+
+
+def priority_sort_key(s: dict):
+    """Επίπεδο → αξία (€, αν τη δίνει το API) → πρώτη εξάντληση. Όπως το byPriority του dashboard."""
+    first = (s.get("LINES") or [{}])[0].get("PREDICTED_DEPLETION_DATE") or "9999"
+    return (PRIORITY_ORDER.get(priority_of(s)[0], 5), -(s.get("VALUE") or 0), first)
+
+
+PRIORITY_NOTE = {
+    "critical": "ΚΡΙΣΙΜΟ: έχει χάσει τον συνηθισμένο κύκλο αγορών του, πιθανότατα έχει ήδη ξεμείνει. ",
+    "lost": "ΠΙΘΑΝΗ ΑΠΩΛΕΙΑ: δεν αγοράζει εδώ και πολύ καιρό. Πρότεινε στον πωλητή να πάρει τον πελάτη τηλέφωνο· "
+            "μην πιέσεις για παραγγελία. ",
+}
+
+
+# ---------------------------------------------------------------------------
 # Κλήση: τα εργαλεία με τους κανόνες ασφαλείας
 # ---------------------------------------------------------------------------
 Request = Callable[..., Awaitable["tuple[int, Any]"]]   # (method, path, body=None) -> (status, json)
+_now = time.monotonic
 
 
 class CallSession:
@@ -206,8 +278,10 @@ class CallSession:
 
     LARGE_FACTOR = 2   # ποσότητα > 2× της πρότασης → ξανά-επιβεβαίωση («15» vs «50»)
 
+    USER_GRACE_S = 2.5              # το transcript του «ναι» μπορεί να φτάσει λίγο μετά το αίτημα του LLM
+
     def __init__(self, request: Request, salesman: int, call_id: str,
-                 on_event: Optional[Callable[..., Awaitable[None]]] = None):
+                 on_event: Optional[Callable[..., Awaitable[None]]] = None, speech_guard: bool = False):
         self.req = request
         self.salesman = salesman
         self.call_id = call_id
@@ -217,6 +291,40 @@ class CallSession:
         self.large_ok: set = set()           # (id, mtrl, qty) που επιβεβαιώθηκαν ως «μεγάλες»
         self.drafts: dict = {}               # id -> erp_draft_id
         self.status = "queued"
+        # Φύλακας ομιλίας (πραγματικές κλήσεις): draft ΜΟΝΟ αν η περίληψη ειπώθηκε ολόκληρη ΚΑΙ ο πωλητής
+        # μίλησε ΜΕΤΑ. Στην κλήση της 7/11 ένα «ναι» πάνω στην περίληψη έφτιαξε draft πριν ακουστεί.
+        self.speech_guard = speech_guard
+        self.prepared_at: dict = {}          # id -> χρόνος του prepare_order
+        self.readback_at: Optional[float] = None   # πότε τελείωσε η τελευταία ολοκληρωμένη περίληψη
+        self.user_at: Optional[float] = None       # πότε μίλησε τελευταία ο πωλητής
+
+    # ---- τι ειπώθηκε (από τους observers της φωνής) ----
+    def note_agent(self, text: str, at: Optional[float] = None):
+        """Μια ΟΛΟΚΛΗΡΩΜΕΝΗ φράση της βοηθού (BotStoppedSpeaking). Περίληψη = στην ΙΔΙΑ φράση και η ερώτηση
+        «Επιβεβαιώνετε…» και η παράδοση (το τέλος της). Κομμένη περίληψη δεν έχει την παράδοση → δεν μετράει."""
+        t = (text or "").lower()
+        if "επιβεβαιών" in t and "παράδοση" in t:
+            self.readback_at = at if at is not None else _now()
+
+    def note_user(self, text: str, at: Optional[float] = None):
+        if (text or "").strip():
+            self.user_at = at if at is not None else _now()
+
+    async def _heard_and_answered(self, sid: str) -> Optional[str]:
+        """None αν επιτρέπεται το write, αλλιώς ο λόγος (οδηγία για τη βοηθό)."""
+        if not self.speech_guard:
+            return None
+        prep = self.prepared_at.get(sid, 0)
+        if self.readback_at is None or self.readback_at < prep:
+            return ("Η περίληψη ΔΕΝ ακούστηκε ολόκληρη. Διάβασε ξανά ΟΛΟΚΛΗΡΗ την περίληψη του prepare_order, "
+                    "μέχρι και την παράδοση, και περίμενε απάντηση. Δεν δημιουργήθηκε τίποτα.")
+        deadline = _now() + self.USER_GRACE_S
+        while self.user_at is None or self.user_at <= self.readback_at:
+            if _now() >= deadline:
+                return ("Ο πωλητής δεν απάντησε ΜΕΤΑ την περίληψη. Ρώτα τον ξανά αν επιβεβαιώνει. "
+                        "Δεν δημιουργήθηκε τίποτα.")
+            await asyncio.sleep(0.1)
+        return None
 
     # ---- βοηθητικά ----
     async def event(self, **kw):
@@ -310,7 +418,8 @@ class CallSession:
         self.sugs[suggestion_id] = out
         self.pending.pop(suggestion_id, None)    # ό,τι είχε διαβαστεί πριν δεν ισχύει πια
         await self.event(type="status", status="discussing", suggestion_id=suggestion_id)
-        return {"status": "ok", "say": f"{spoken_item(line['ITEM_NAME'])}: η ποσότητα έγινε {qty_words(qty, line['UNIT'])}."}
+        return {"status": "ok", "say": f"{spoken_item(line['ITEM_NAME'])}: η ποσότητα έγινε {qty_words(qty, line['UNIT'])}"
+                                       f"{value_phrase(out).replace(', αξία', '· νέα αξία της παραγγελίας')}."}
 
     async def prepare_order(self, suggestion_id: str) -> dict:
         """Βήμα 1/2: ο πωλητής ζήτησε παραγγελία → διαβάζεται η ακριβής περίληψη. ΚΑΝΕΝΑ write ακόμα."""
@@ -322,6 +431,7 @@ class CallSession:
         if s["status"] not in OPEN_STATUSES:
             return self._err(f"Η πρόταση δεν μπορεί να γίνει παραγγελία (κατάσταση {s['status']}).")
         self.pending[suggestion_id] = s["version"]
+        self.prepared_at[suggestion_id] = _now()   # μόνο περίληψη που θα ειπωθεί ΜΕΤΑ από εδώ μετράει
         await self.set_status("confirming", suggestion_id=suggestion_id)
         return {"status": "awaiting_confirmation", "say": read_back(s),
                 "message": "Διάβασε το «say» ΟΛΟΚΛΗΡΟ και αυτούσιο, τελείωσε με την ερώτηση και ΣΤΑΜΑΤΑ. "
@@ -342,6 +452,11 @@ class CallSession:
         if s["version"] != version:
             self.pending.pop(suggestion_id, None)
             return self._err("Η πρόταση άλλαξε μετά την περίληψη. Κάλεσε ξανά prepare_order και διάβασέ τη.")
+        not_yet = await self._heard_and_answered(suggestion_id)
+        if not_yet:
+            await self.event(type="status", status="confirming", suggestion_id=suggestion_id,
+                             text="Μπλοκαρίστηκε draft: η περίληψη δεν ακούστηκε ολόκληρη πριν το «ναι»")
+            return self._err(not_yet, say=read_back(s))
         code, conf = await self.req("POST", f"/api/suggestions/{suggestion_id}/confirm", {"version": version})
         if code != 200 or not conf.get("confirmation_token"):
             return self._err("Η επιβεβαίωση απέτυχε στο σύστημα. Δεν δημιουργήθηκε draft.")
