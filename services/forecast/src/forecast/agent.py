@@ -2,7 +2,7 @@
 
   1. fetch     διαβάζει τιμολόγια, πελάτες, είδη, προσφορές από το ERP API (fallback: CSV του pack)
   2. clean     ακυρωμένα, υπηρεσίες, πιστωτικά, free goods (ingest.clean)
-  3. forecast  ημερομηνία εξάντλησης για τα 1.975 ζεύγη (hybrid_v4) + submission
+  3. forecast  ημερομηνία εξάντλησης για τα 1.975 ζεύγη (hybrid_v5) + submission
   4. orders    Suggested Orders ανά πελάτη: ποσότητα, παράδοση σε εργάσιμη πριν την εξάντληση, evidence
   5. validate  κάθε πρόταση περνά από τους κανόνες του ERP (POST /api/draft-orders) και του README — πριν τη δει άνθρωπος
   6. selfcheck backtest: η ακρίβεια πρέπει να μείνει κάτω από το όριο, αλλιώς δεν δημοσιεύει

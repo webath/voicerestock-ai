@@ -52,11 +52,13 @@ def test_v3_is_frozen_and_v4_does_not_change_regular_purchase_cycles():
     old = models.CFG["adaptive_promo"]
     try:
         models.CFG["adaptive_promo"] = False
+        models.CFG["cadence_days"] = 180
         legacy = models.components(d, h, tg, c)
     finally:
         models.CFG["adaptive_promo"] = old
+        models.CFG["cadence_days"] = before["cadence_days"]
     pd.testing.assert_frame_equal(v3, legacy[["TRDR", "MTRL", "DATE"]])
-    newer = models.components(d, h, tg, c)
+    newer = models.with_cfg(models.components, "v4_components", adaptive_promo=True, cadence_days=180)(d, h, tg, c)
     regular = ~newer["last_in_promo"]
     pd.testing.assert_series_equal(newer.loc[regular, "DATE"], legacy.loc[regular, "DATE"])
     assert newer["promo_cycle_multiplier"].between(1, 3).all()

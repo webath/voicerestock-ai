@@ -92,7 +92,7 @@ def evidence(d: Data, row, cold: bool, peer: str | None) -> dict:
         factors.append({"name": "seasonality", "impact_days": _r(impact, 1),
                         "source": "ίδια περίοδος πέρσι × φετινή τάση" if row.has_ly else "εποχικός δείκτης κατηγορίας × περιοχής"})
     if not math.isnan(row.interval):
-        src = (f"αγοράζει κάθε ~{int(round(row.interval))} μέρες (διάμεσος 180 ημερών)" if not row.cold_pair
+        src = (f"αγοράζει κάθε ~{int(round(row.interval))} μέρες (διάμεσος {int(row.interval_window_days)} ημερών)" if not row.cold_pair
                else f"νέος πελάτης: κύκλος ~{int(round(row.interval))} μερών από παρόμοιους πελάτες")
         factors.append({"name": "purchase_cycle", "impact_days": None, "source": src})
     if row.last_in_promo and row.interval_used > row.interval:
