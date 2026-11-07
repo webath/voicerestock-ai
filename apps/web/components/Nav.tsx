@@ -25,7 +25,7 @@ export function NavFrame({ path }: { path: string | null }) {
       <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
         <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight text-ink">
           <Logo />
-          <span>VoiceRestock<span className="text-ink-muted font-normal"> AI</span></span>
+          <span title="Voice Ordering & Restock Assistant">VORA<span className="hidden text-ink-muted font-normal lg:inline"> · Voice Ordering & Restock Assistant</span></span>
         </Link>
         <div className="seg -mx-1 max-w-full overflow-x-auto">
           {NAV.map((n) => (

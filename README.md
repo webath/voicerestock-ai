@@ -1,4 +1,4 @@
-# VoiceRestock AI
+# VORA — Voice Ordering & Restock Assistant
 
 **Predict. Explain. Call. Reorder.** — Revival Challenge #5 «The Intelligent Restocking Agent», ΕΚΠΑ hackathon 6–8/11/2026.
 

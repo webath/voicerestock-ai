@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Urgency } from "@/lib/api";
+import type { PriorityInfo } from "@/lib/priority";
 
 export function PageHeader({ title, subtitle, eyebrow, children }: {
   title: string; subtitle?: ReactNode; eyebrow?: ReactNode; children?: ReactNode;
@@ -59,6 +60,27 @@ export function UrgencyBadge({ urgency }: { urgency: Urgency }) {
   const u = URGENCY[urgency];
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
+      <span aria-hidden style={{ color: u.color }}>{u.icon}</span>
+      {u.label}
+    </span>
+  );
+}
+
+const PRIORITY: Record<PriorityInfo["priority"], { label: string; color: string; icon: string }> = {
+  critical: { label: "Κρίσιμο", color: "var(--critical)", icon: "▲" },
+  high: URGENCY.high,
+  lost: { label: "Πιθανή απώλεια", color: "var(--serious)", icon: "?" },
+  medium: URGENCY.medium,
+  low: URGENCY.low,
+};
+
+/** Επίπεδο προτεραιότητας του πωλητή (lib/priority.ts)· tooltip = γιατί. */
+export function PriorityBadge({ info, reason }: { info: PriorityInfo; reason?: string | null }) {
+  const u = PRIORITY[info.priority];
+  const strong = info.priority === "critical";
+  return (
+    <span title={reason ?? undefined}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs ${strong ? "border-[var(--critical)] font-semibold text-ink" : "border-line text-ink-2"} bg-surface-2`}>
       <span aria-hidden style={{ color: u.color }}>{u.icon}</span>
       {u.label}
     </span>

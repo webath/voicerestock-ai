@@ -1,1 +1,1 @@
-"""VoiceRestock forecast service. Βλ. services/forecast/README.md"""
+"""VORA forecast service. Βλ. services/forecast/README.md"""

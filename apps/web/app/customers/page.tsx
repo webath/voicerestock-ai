@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ErrorBox, Loading, PageHeader, UrgencyBadge } from "@/components/ui";
+import { ErrorBox, Loading, PageHeader, PriorityBadge, UrgencyBadge } from "@/components/ui";
+import { priorityOf, priorityReason } from "@/lib/priority";
 import { useApi, type Customer, type Suggestion } from "@/lib/api";
 import { fmtDay, fmtNum } from "@/lib/format";
 
@@ -55,7 +56,7 @@ export default function CustomersPage() {
                 <td className="text-ink-2">{c.SALESMAN_NAME}</td>
                 <td className="tnum">{s ? fmtDay(s.LINES[0].PREDICTED_DEPLETION_DATE) : "–"}</td>
                 <td className="num">{s ? s.LINES.length : "–"}</td>
-                <td>{s ? <UrgencyBadge urgency={s.urgency} /> : <UrgencyBadge urgency="none" />}</td>
+                <td>{s ? <PriorityBadge info={priorityOf(s)} reason={priorityReason(priorityOf(s))} /> : <UrgencyBadge urgency="none" />}</td>
               </tr>
             ))}
           </tbody>
