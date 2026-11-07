@@ -45,7 +45,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(outreach, "has_credentials", lambda: False)
     monkeypatch.setenv("SMS_DEMO_TO", "+30 694 715 0522")
     http = FakeHTTP()
-    sms = outreach.Apifon(token="tok123", secret="sec456", sender="DEMO", post=http)
+    sms = outreach.Apifon(token="tok123", secret="sec456", sender="DEMO", post=http, auth="hmac")
     scanner = MarketScanner(lambda: {}, every_days=0, client_factory=lambda: None, credentials=lambda: False)
     c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), market=scanner,
                               campaign_state=outreach.CampaignState(tmp_path / "state.json"), sms=sms))
@@ -160,3 +160,29 @@ def test_winback_and_price_promo_drafts(env):
     assert f"-{round(-promo['change_pct'] * 100)}%" in d["text"]
     inc = next(p for p in r["pricing"] if p["action"] == "increase")
     assert c.post("/api/campaigns/sms/draft", json={"kind": "price_promo", "trdr": inc["targets"][0]["TRDR"], "mtrl": inc["MTRL"]}).status_code == 400
+
+
+def test_apifon_oauth_bearer_and_refresh():
+    calls, tokens = [], iter(["AT-1", "AT-2"])
+
+    def token_post(url, data):
+        calls.append(("token", data["client_id"], data["scope"]))
+        return NS(status_code=200, json=lambda: {"access_token": next(tokens), "expires_in": 86400})
+    http = FakeHTTP()
+    a = outreach.Apifon(token="cid", secret="csec", sender="VORA", post=http, token_post=token_post)
+    assert a.send("306900000000", "Γεια", "SMS-1")["message_id"] == "msg-1"
+    assert a.auth == "oauth" and http.calls[0]["headers"]["Authorization"] == "Bearer AT-1"
+    a.send("306900000000", "Γεια", "SMS-2")
+    assert len(calls) == 1                                   # το token ξαναχρησιμοποιείται
+    http.status, http.body = 401, {}
+    with pytest.raises(outreach.ApifonError):
+        a.send("306900000000", "Γεια", "SMS-3")
+    assert len(calls) == 2 and http.calls[-1]["headers"]["Authorization"] == "Bearer AT-2"   # μία ανανέωση, όχι βρόχος
+
+
+def test_apifon_auto_falls_back_to_hmac():
+    http = FakeHTTP()
+    a = outreach.Apifon(token="tok", secret="sec", post=http,
+                        token_post=lambda url, data: NS(status_code=401, json=lambda: {"error": "invalid_client"}))
+    a.send("306900000000", "Γεια", "SMS-1")
+    assert a.auth == "hmac" and http.calls[0]["headers"]["Authorization"].startswith("ApifonWS tok:")
