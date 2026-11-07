@@ -490,7 +490,10 @@ async def cors(request: web.Request, handler):
     resp = web.Response(status=204) if request.method == "OPTIONS" else await handler(request)
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type,X-Voice-Token"
+    # Ό,τι headers ζητά ο browser (π.χ. το dashboard στέλνει X-Actor). Δεν ανοίγει τίποτα: ακούμε μόνο σε 127.0.0.1
+    # και, αν οριστεί, το VOICE_TRIGGER_TOKEN ελέγχεται κανονικά στο POST.
+    resp.headers["Access-Control-Allow-Headers"] = request.headers.get(
+        "Access-Control-Request-Headers", "Content-Type,X-Voice-Token,X-Actor")
     return resp
 
 
