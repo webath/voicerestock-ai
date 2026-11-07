@@ -65,7 +65,7 @@
 - [ ] Twilio λογαριασμός + αριθμός + **verified caller ID** του κινητού του (trial κλήσεις πάνε μόνο σε verified αριθμούς) + Geo permissions για Ελλάδα
 - [ ] **Spike (το πιο ρισκαρισμένο κομμάτι όλου του project):** πραγματική εξερχόμενη κλήση στο κινητό με ConversationRelay, `language=el-GR`, που απλά απαντά «γεια». Επιβεβαίωση ότι STT και TTS δουλεύουν στα ελληνικά
 - [ ] Αν το Greek ConversationRelay δεν δουλεύει μέσα σε ~2 ώρες → Plan B (βλ. `docs/VOICE.md`)
-- [ ] `apps/web`: `create-next-app`, layout, πλοήγηση, client για το App API
+- [x] `apps/web`: `create-next-app`, layout, πλοήγηση, client για το App API
 
 ### Φάση 1 — Πρώτο submission & βάσεις (Παρ 21:00–02:00)
 
@@ -76,9 +76,9 @@
 - [x] **`submissions/team_<όνομα>.csv` v1** με 1.975 γραμμές → commit. Από εδώ και πέρα έχουμε πάντα κάτι να παραδώσουμε
 
 **Νίκος**
-- [ ] Σελίδα **At Risk** πάνω στο mock (`GET /api/risk`, `GET /api/suggestions`) με φίλτρα πωλητή / κατηγορίας / περιοχής / urgency
+- [x] Σελίδα **At Risk** πάνω στο mock (`GET /api/risk`, `GET /api/suggestions`) με φίλτρα πωλητή / κατηγορίας / περιοχής / urgency
 - [ ] `apps/voice`: Node + TypeScript + Fastify, TwiML endpoint, WebSocket για ConversationRelay, LLM loop με tool calling πάνω στο mock
-- [ ] Ο agent διαβάζει μια πρόταση από το fixture και την περιγράφει στα ελληνικά στο τηλέφωνο
+- [x] Ο agent διαβάζει μια πρόταση από το fixture και την περιγράφει στα ελληνικά στο τηλέφωνο
 
 ### Φάση 2 — Καλύτερο μοντέλο, πραγματικό API, πλήρεις ροές (Σαβ 09:00–14:00)
 
@@ -92,7 +92,7 @@
 - [x] `apps/api` (FastAPI): όλα τα endpoints του `docs/CONTRACTS.md` με την ίδια συμπεριφορά με το mock (versions, tokens, idempotency), SQLite για state/audit
 
 **Νίκος**
-- [ ] Σελίδα **Suggested Orders**: αλλαγή ποσότητας, «Έγκριση» (confirm → create-draft) → δείχνει το ERP draft id
+- [x] Σελίδα **Suggested Orders**: αλλαγή ποσότητας, «Έγκριση» (confirm → create-draft) → δείχνει το ERP draft id
 - [ ] Voice: όλα τα tools, state machine κλήσης, διπλή προφορική επιβεβαίωση, εξήγηση **μόνο** από το `evidence`
 
 ### 🔗 Checkpoint integration (Σαβ 14:00)
@@ -110,8 +110,8 @@
 - [ ] Συνέχεια στο μοντέλο (το MAE είναι 30% του βαθμού)
 
 **Νίκος**
-- [ ] Σελίδες **Customer detail** (timeline αγορών + forecast + factors + εξήγηση), **Evaluation** (baseline vs μοντέλο), **Overview**
-- [ ] Σελίδα **Voice Operations** (ουρά κλήσεων, status, transcript, draft id) + κουμπί «Κάλεσε τον πωλητή»
+- [x] Σελίδες **Customer detail** (timeline αγορών + forecast + factors + εξήγηση), **Evaluation** (baseline vs μοντέλο), **Overview**
+- [x] Σελίδα **Voice Operations** (ουρά κλήσεων, status, transcript, draft id) + κουμπί «Κάλεσε τον πωλητή»
 - [ ] Voice edge cases: voicemail, κλείσιμο γραμμής, «15» vs «50», διπλό webhook → **ποτέ** διπλό draft· allowlist, quiet hours, AI disclosure
 
 ### Φάση 4 — Τελικά (Κυρ 08:00–13:00)

@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/* Tokens: παλέτα αναφοράς του dataviz skill (surfaces, ink, series, status). Μία πηγή για light/dark. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-2: #f3f2ee;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --line: rgba(11, 11, 11, 0.1);
+  --series-1: #2a78d6;
+  --series-1-soft: #cde2fb;
+  --good: #0ca30c;
+  --good-ink: #006300;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --tint-good: #e7f5e7;
+  --tint-warning: #fff4dc;
+  --tint-critical: #fbe9e9;
+  --tint-info: #e8f1fc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --line: rgba(255, 255, 255, 0.1);
+    --series-1: #3987e5;
+    --series-1-soft: #184f95;
+    --good-ink: #0ca30c;
+    --tint-good: #13291a;
+    --tint-warning: #33280f;
+    --tint-critical: #3a1717;
+    --tint-info: #14243a;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #232321;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --line: rgba(255, 255, 255, 0.1);
+  --series-1: #3987e5;
+  --series-1-soft: #184f95;
+  --good-ink: #0ca30c;
+  --tint-good: #13291a;
+  --tint-warning: #33280f;
+  --tint-critical: #3a1717;
+  --tint-info: #14243a;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+  --color-line: var(--line);
+  --color-series: var(--series-1);
+  --color-series-soft: var(--series-1-soft);
+  --color-good: var(--good);
+  --color-good-ink: var(--good-ink);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-tint-good: var(--tint-good);
+  --color-tint-warning: var(--tint-warning);
+  --color-tint-critical: var(--tint-critical);
+  --color-tint-info: var(--tint-info);
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body {
+  background: var(--page);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
