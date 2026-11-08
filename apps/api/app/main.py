@@ -18,7 +18,9 @@ import pandas as pd
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, StrictInt
+from typing import Literal
+
+from pydantic import BaseModel, Field, StrictInt
 
 from . import assistant as ai
 from .agent import AgentRunner
@@ -26,6 +28,7 @@ from .campaigns import Campaigns
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
 from .market import MarketScanner
+from .security import SecurityMiddleware, allowed_origins
 from .simulate import Busy, CallSimulator, NoSuggestion
 from . import outreach
 from .store import PROCESSED, ROOT, Store
@@ -55,12 +58,12 @@ class DraftBody(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    role: str
-    content: str
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
 
 
 class ChatBody(BaseModel):
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(min_length=1, max_length=40)
     salesman: int | None = None
 
 
@@ -92,11 +95,11 @@ class SmsSend(SmsTarget):
 
 
 class CallEvent(BaseModel):
-    call_sid: str
-    type: str | None = None
-    status: str | None = None
-    text: str | None = None
-    role: str | None = None
+    call_sid: str = Field(max_length=80)
+    type: str | None = Field(None, max_length=40)
+    status: str | None = Field(None, max_length=40)
+    text: str | None = Field(None, max_length=4000)
+    role: str | None = Field(None, max_length=20)
     salesman: int | None = None
     suggestion_id: str | None = None
     erp_draft_id: str | None = None
@@ -111,7 +114,10 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
                market: MarketScanner | None = None, campaign_state: outreach.CampaignState | None = None,
                sms: outreach.Apifon | None = None, sim_pace: float | None = None) -> FastAPI:
     app = FastAPI(title="VORA App API")
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    # Μόνο το dashboard μιλά στο API από browser· ο voice agent είναι server-to-server (χωρίς CORS).
+    app.add_middleware(CORSMiddleware, allow_origins=allowed_origins(), allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+                       allow_headers=["Content-Type", "X-Actor"])
+    app.add_middleware(SecurityMiddleware)          # εξωτερικό στρώμα: Host, Origin, X-Actor, μέγεθος, ρυθμός, headers
     app.state.store = store or Store()
     app.state.erp = erp or MockERPAdapter()
     app.state.explanations = {}

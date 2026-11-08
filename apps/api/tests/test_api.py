@@ -29,7 +29,7 @@ def env(tmp_path, monkeypatch):
     shutil.copy(PROCESSED / "suggestions.json", seed)
     erp = FakeERP()
     monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
-    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), erp))
+    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), erp), headers={"X-Actor": "test"})
     sid = c.get("/api/suggestions").json()[0]["id"]
     return c, erp, sid
 
@@ -233,7 +233,7 @@ def make_agent_env(tmp_path, monkeypatch, ok=True, slow=0.0):
     monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
     runner = AgentRunner(on_finish=None, cmd=lambda trig: [sys.executable, "-c", FAKE_AGENT, "ok" if ok else "fail", str(slow)],
                          runs_file=tmp_path / "runs.json", schedule="")
-    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), runner))
+    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), runner), headers={"X-Actor": "test"})
     return c, runner
 
 
@@ -292,7 +292,7 @@ def sim_env(tmp_path, monkeypatch):
     erp = FakeERP()
     monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
     app = create_app(Store(tmp_path / "s.sqlite", seed), erp, sim_pace=0)
-    return TestClient(app), erp, app
+    return TestClient(app, headers={"X-Actor": "test"}), erp, app
 
 
 def test_simulated_call_reaches_draft_for_most_urgent_customer(sim_env):
