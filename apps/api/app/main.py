@@ -11,6 +11,7 @@ import logging
 import os
 import secrets
 import threading
+import time
 import uuid
 from functools import lru_cache
 
@@ -29,7 +30,7 @@ from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
 from .market import MarketScanner
 from .security import SecurityMiddleware, allowed_origins
-from .simulate import Busy, CallSimulator, NoSuggestion
+from .simulate import Busy, CallSimulator, NoSuggestion, dm, pick, worst_line
 from . import outreach
 from .store import PROCESSED, ROOT, Store
 
@@ -105,6 +106,10 @@ class CallEvent(BaseModel):
     erp_draft_id: str | None = None
 
 
+class FocusBody(BaseModel):
+    salesman: int
+
+
 class SimulateBody(BaseModel):
     salesman: int | None = None
     suggestion_id: str | None = None
@@ -166,7 +171,11 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
                 for r in df.itertuples()]
 
     @app.get("/api/suggestions")
-    def suggestions(salesman: int | None = None, status: str | None = None):
+    def suggestions(salesman: int | None = None, status: str | None = None, x_actor: str = Header("unknown")):
+        # Live κλήση demo: ο voice agent βλέπει μόνο την πρόταση-εστίαση του πωλητή (ένα προϊόν).
+        if salesman is not None and x_actor.startswith("voice:") and (f := focused(salesman)) \
+                and status in (None, f["status"]):
+            return [f]
         rows = [s for s in S().all() if (salesman is None or s["SALESMAN"] == salesman)
                 and (status is None or s["status"] == status)]
         return sorted(rows, key=lambda s: (URGENCY_ORDER[s["urgency"]], s["LINES"][0]["PREDICTED_DEPLETION_DATE"]))
@@ -335,6 +344,41 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
         "create_draft": lambda sid, tok, idem: create_draft(sid, DraftBody(confirmation_token=tok, idempotency_key=idem), x_actor=SIM),
     }, pace=sim_pace)
 
+    # ---------------- live κλήση demo: ένα προϊόν ----------------
+    # Πριν από τη live κλήση, η πιο επείγουσα πρόταση του πωλητή κρατά ΜΟΝΟ το είδος με τον μεγαλύτερο κίνδυνο
+    # (νέα έκδοση· οι παλιές επιβεβαιώσεις ακυρώνονται) και για FOCUS_TTL ο voice agent βλέπει μόνο αυτήν.
+    # Έτσι η φωνή, η περίληψη και το draft στο ERP έχουν το ίδιο ένα είδος. «Επαναφορά demo» → πίσω η πλήρης πρόταση.
+    FOCUS_TTL = 15 * 60
+    app.state.voice_focus = {}
+
+    def focused(salesman: int) -> dict | None:
+        f = app.state.voice_focus.get(salesman)
+        if not f or f["until"] < time.time():
+            return None
+        s = S().get(f["sid"])
+        return s if s and s["status"] in ("proposed", "modified", "confirmed") else None
+
+    @app.post("/api/calls/focus")
+    def call_focus(body: FocusBody, x_actor: str = Header("unknown")):
+        with S().lock:
+            try:
+                s = pick(S().all(), body.salesman)
+            except NoSuggestion as e:
+                raise ApiError(409, "no_suggestion", str(e))
+            line = worst_line(s)[0] or min(s["LINES"], key=lambda l: l["PREDICTED_DEPLETION_DATE"])
+            if len(s["LINES"]) > 1:
+                s["LINES"] = [line]
+                s["REASON"] = f"{line['ITEM_NAME']}: εκτιμώμενη εξάντληση {dm(line['PREDICTED_DEPLETION_DATE'])}"
+                s["version"] += 1
+                S().drop_tokens(s["id"])
+                S().put(s)
+            app.state.voice_focus[body.salesman] = {"sid": s["id"], "until": time.time() + FOCUS_TTL}
+            S().audit(x_actor, "voice focus", s["id"], f"{line['MTRL']} ({line['ITEM_NAME']})")
+            s = S().get(s["id"])
+        l = s["LINES"][0]
+        return {"suggestion_id": s["id"], "customer": s["CUSTOMER_NAME"], "item": l["ITEM_NAME"], "qty": l["QTY1"],
+                "unit": l["UNIT"], "value": s.get("VALUE"), "until_s": FOCUS_TTL}
+
     @app.post("/api/calls/simulate", status_code=202)
     def simulate_call(body: SimulateBody | None = None):
         body = body or SimulateBody()
@@ -498,6 +542,7 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
     def reset(x_actor: str = Header("unknown")):
         n = S().reset()
         app.state.explanations.clear()
+        app.state.voice_focus.clear()                   # πίσω οι πλήρεις προτάσεις και για τον voice agent
         S().audit(x_actor, "reset", None, f"{n} suggestions")
         return {"ok": True, "suggestions": n}
 

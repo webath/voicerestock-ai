@@ -324,3 +324,38 @@ def test_simulated_call_rejects_unknown_salesman(sim_env):
     c, _, _ = sim_env
     r = c.post("/api/calls/simulate", json={"salesman": 999999})
     assert r.status_code == 409 and r.json()["error"] == "no_suggestion"
+
+
+# ---------------- live κλήση demo: ένα προϊόν ----------------
+def test_voice_focus_one_product_end_to_end(sim_env):
+    c, erp, app = sim_env
+    r = c.post("/api/calls/focus", json={"salesman": 105})
+    assert r.status_code == 200
+    f = r.json()
+    s = c.get(f"/api/suggestions/{f['suggestion_id']}").json()
+    assert len(s["LINES"]) == 1 and s["LINES"][0]["ITEM_NAME"] == f["item"] and s["version"] == 2
+    # ο voice agent βλέπει ΜΟΝΟ αυτήν· το dashboard όλες
+    voice = {"X-Actor": "voice:vr-105-test"}
+    v = c.get("/api/suggestions?salesman=105", headers=voice).json()
+    assert [x["id"] for x in v] == [f["suggestion_id"]]
+    assert len(c.get("/api/suggestions?salesman=105").json()) > 1
+    # περίληψη → «ναι» → draft με ένα είδος
+    tok = c.post(f"/api/suggestions/{f['suggestion_id']}/confirm", json={"version": 2}, headers=voice).json()["confirmation_token"]
+    d = c.post(f"/api/suggestions/{f['suggestion_id']}/create-draft",
+               json={"confirmation_token": tok, "idempotency_key": "vr-105-test:1"}, headers=voice)
+    assert d.status_code == 200 and len(erp.calls) == 1 and len(erp.calls[0]["LINES"]) == 1
+    # μετά το draft η εστίαση σβήνει → ο agent ξαναβλέπει τις υπόλοιπες ανοιχτές
+    assert len(c.get("/api/suggestions?salesman=105", headers=voice).json()) > 1
+
+
+def test_voice_focus_unknown_salesman(sim_env):
+    c, _, _ = sim_env
+    assert c.post("/api/calls/focus", json={"salesman": 999999}).json()["error"] == "no_suggestion"
+
+
+def test_reset_clears_voice_focus(sim_env):
+    c, _, _ = sim_env
+    c.post("/api/calls/focus", json={"salesman": 105})
+    c.post("/api/admin/reset")
+    v = c.get("/api/suggestions?salesman=105", headers={"X-Actor": "voice:x"}).json()
+    assert len(v) > 1 and all(len(s["LINES"]) >= 1 for s in v)

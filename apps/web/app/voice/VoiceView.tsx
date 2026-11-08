@@ -54,6 +54,7 @@ export function VoiceView() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [simulating, setSimulating] = useState(false);
   const health = useVoiceHealth();
+  const [focus, setFocus] = useState<{ customer: string; item: string; qty: number; unit: string } | null>(null);
   const [simMsg, setSimMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [sound, setSound] = useState(true);
   const spoken = useRef<Set<string> | null>(null);
@@ -101,17 +102,22 @@ export function VoiceView() {
   const list = salesmen.data ?? [];
   const fallback = list.find((s) => s.phone) ?? list.find((s) => s.PRSN === 105) ?? list[0];
   const selected = who || String(fallback?.PRSN ?? "");
-  // Από ποιον πελάτη θα ξεκινήσει η κλήση: ίδια σειρά με τον voice agent (vr_core.priority_sort_key)
-  const next = (sugs.data ?? []).filter((s) => s.SALESMAN === Number(selected) && (s.status === "proposed" || s.status === "modified"))
-    .sort(byPriority)[0];
+  // Για ποιον πελάτη θα μιλήσει η κλήση: ίδια επιλογή με το POST /api/calls/focus (κρίσιμος → αξία, όχι «πιθανή απώλεια»)
+  const next = (sugs.data ?? []).filter((s) => s.SALESMAN === Number(selected) && (s.status === "proposed" || s.status === "modified")
+    && priorityOf(s).priority !== "lost").sort(byPriority)[0];
+  const nextItem = next ? (priorityOf(next).item ?? next.LINES[0].ITEM_NAME) : null;
   const online = health !== null && health !== "down" && health.ok;
   const hasPhone = online && health.salesmen_with_phone.includes(Number(selected));
 
   async function dial() {
     setDialing(true); setMsg(null);
     try {
+      // 1) η πιο επείγουσα πρόταση εστιάζει σε ΕΝΑ προϊόν  2) ο voice agent καλεί (βλέπει μόνο αυτήν)
+      const f = await apiPost<{ customer: string; item: string; qty: number; unit: string }>("/api/calls/focus", { salesman: Number(selected) });
+      setFocus(f);
+      sugs.reload();
       await apiPost("/voice/calls", { salesman: Number(selected) }, VOICE_URL, VOICE_TOKEN ? { "X-Voice-Token": VOICE_TOKEN } : {});
-      setMsg({ ok: true, text: `Το κινητό χτυπά σε λίγα δευτερόλεπτα${next ? ` — η VORA ξεκινά από τον πελάτη ${next.CUSTOMER_NAME}` : ""}. Η κλήση εμφανίζεται live δεξιά.` });
+      setMsg({ ok: true, text: `Το κινητό χτυπά σε λίγα δευτερόλεπτα — η VORA μιλά για ${f.item} στον πελάτη ${f.customer}. Η κλήση εμφανίζεται live δεξιά.` });
       toast({ kind: "success", title: "Η κλήση ξεκίνησε", text: `Ο AI βοηθός καλεί τον/την ${names.get(Number(selected)) ?? selected}.` });
       calls.reload();
     } catch (e) {
@@ -146,13 +152,18 @@ export function VoiceView() {
       <div className="reveal grid gap-6 lg:grid-cols-3">
         <Card title="Νέα κλήση" subtitle="Μόνο σε εγκεκριμένους αριθμούς, εργάσιμες ώρες.">
           <div className="flex flex-col gap-3">
-            <Select label="Πωλητής" value={selected} onChange={setWho}
+            <Select label="Πωλητής" value={selected} onChange={(v) => { setWho(v); setFocus(null); }}
               options={(salesmen.data ?? []).map((s) => ({ value: String(s.PRSN), label: `${s.NAME} · ${fmtNum(pending.get(s.PRSN) ?? 0)} προτάσεις` }))} />
             <VoiceStatus health={health} hasPhone={hasPhone} />
-            {next && (
+            {focus ? (
               <p className="text-xs text-ink-2">
-                Η VORA θα ξεκινήσει από τον πιο επείγοντα: <strong className="text-ink">{next.CUSTOMER_NAME}</strong>{" "}
-                ({PRIORITY_LABEL[priorityOf(next).priority] ?? priorityOf(next).priority})
+                Η VORA μιλά για <strong className="text-ink">ένα προϊόν</strong>: {focus.item} ({focus.qty} {focus.unit}) ·{" "}
+                <strong className="text-ink">{focus.customer}</strong>
+              </p>
+            ) : next && (
+              <p className="text-xs text-ink-2">
+                Η VORA θα μιλήσει για <strong className="text-ink">ένα προϊόν</strong>: {nextItem} ·{" "}
+                <strong className="text-ink">{next.CUSTOMER_NAME}</strong> ({PRIORITY_LABEL[priorityOf(next).priority] ?? priorityOf(next).priority})
               </p>
             )}
             <button className="btn btn-primary" onClick={dial} disabled={dialing || !selected}>
