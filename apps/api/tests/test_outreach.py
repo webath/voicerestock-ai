@@ -43,12 +43,12 @@ def env(tmp_path, monkeypatch):
     shutil.copy(PROCESSED / "suggestions.json", seed)
     monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
     monkeypatch.setattr(outreach, "has_credentials", lambda: False)
-    monkeypatch.setenv("SMS_DEMO_TO", "+30 694 715 0522")
+    monkeypatch.setenv("SMS_DEMO_TO", "+30 690 000 0001")
     http = FakeHTTP()
     sms = outreach.Apifon(token="tok123", secret="sec456", sender="DEMO", post=http, auth="hmac")
     scanner = MarketScanner(lambda: {}, every_days=0, client_factory=lambda: None, credentials=lambda: False)
     c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), market=scanner,
-                              campaign_state=outreach.CampaignState(tmp_path / "state.json"), sms=sms))
+                              campaign_state=outreach.CampaignState(tmp_path / "state.json"), sms=sms), headers={"X-Actor": "test"})
     return c, http
 
 
@@ -79,7 +79,7 @@ def test_discount_edit_flows_into_sms(env):
     r = c.put("/api/campaigns/discounts", json={"event": e["event"], "mtrl": it["MTRL"], "disc": 12})
     assert r.status_code == 200 and r.json()["suggested_disc"] == 12 and r.json()["suggested_disc_system"] == it["suggested_disc"]
     d = c.post("/api/campaigns/sms/draft", json={"kind": "seasonal", "trdr": t["TRDR"], "mtrl": it["MTRL"], "event": e["event"]}).json()
-    assert d["source"] == "template" and "-12%" in d["text"] and d["can_send"] and d["to"].startswith("+30694")
+    assert d["source"] == "template" and "-12%" in d["text"] and d["can_send"] and d["to"].startswith("+30690")
     assert c.put("/api/campaigns/discounts", json={"event": e["event"], "mtrl": it["MTRL"], "disc": 80}).status_code == 400
 
 
@@ -110,7 +110,7 @@ def test_apifon_request_is_signed(env):
     call = http.calls[0]
     assert call["url"] == "https://ars.apifon.com/services/api/v1/sms/send"
     sent = json.loads(call["content"])
-    assert sent["subscribers"] == [{"number": "306947150522"}] and sent["message"] == {"text": "Δοκιμή προσφοράς", "dc": 2, "sender_id": "DEMO"}
+    assert sent["subscribers"] == [{"number": "306900000001"}] and sent["message"] == {"text": "Δοκιμή προσφοράς", "dc": 2, "sender_id": "DEMO"}
     date = call["headers"]["X-ApifonWS-Date"]
     expected = base64.b64encode(hmac.new(b"sec456", f"POST\n/services/api/v1/sms/send\n{call['content'].decode()}\n{date}".encode(),
                                          hashlib.sha256).digest()).decode()
