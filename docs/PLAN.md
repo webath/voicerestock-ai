@@ -1,5 +1,7 @@
 # Πλάνο υλοποίησης & μοιρασιά δουλειάς
 
+> **Ο διαγωνισμός τελείωσε (8/11/2026).** Το αρχείο μένει ως ιστορικό της υλοποίησης. Τρέχουσα κατάσταση και οδηγίες: `README.md`.
+
 **Ομάδα:** Δημήτρης (data, backend & dashboard) · Νίκος (voice agent)
 **Παρουσίαση:** Κυριακή 8/11, 15:00 · **Code freeze:** Κυριακή 13:00
 **Χρόνος:** Παρασκευή 6/11 ~19:00 → Κυριακή 13:00 ≈ 30–34 ώρες ενεργής δουλειάς
@@ -62,9 +64,9 @@
 - [x] Tests για τους κανόνες: 0 ακυρωμένα, πιστωτικά αρνητικά, free goods μέσα, μεταφορικά έξω
 
 **Νίκος**
-- [ ] Twilio λογαριασμός + αριθμός + **verified caller ID** του κινητού του (trial κλήσεις πάνε μόνο σε verified αριθμούς) + Geo permissions για Ελλάδα
-- [ ] **Spike (το πιο ρισκαρισμένο κομμάτι όλου του project):** πραγματική εξερχόμενη κλήση στο κινητό με ConversationRelay, `language=el-GR`, που απλά απαντά «γεια». Επιβεβαίωση ότι STT και TTS δουλεύουν στα ελληνικά
-- [ ] Αν το Greek ConversationRelay δεν δουλεύει μέσα σε ~2 ώρες → Plan B (βλ. `docs/VOICE.md`)
+- [x] ~~Twilio~~ → δεν χρειάστηκε: ο voice agent τρέχει σε VPS (Pipecat + LiveKit SIP → FreePBX → SIP trunk). Βλ. `apps/voice/README.md`
+- [x] Spike: πραγματική εξερχόμενη κλήση στα ελληνικά από το dashboard (7/11, με draft στο ERP)
+- [x] Plan B: «Προσομοίωση κλήσης» στο dashboard (φωνή από τον browser, πραγματικό draft)
 - [x] `apps/web`: Next.js 16, layout, πλοήγηση, client για το App API (`lib/api.ts`) — έτοιμο από τον Δημήτρη
 
 ### Φάση 1 — Πρώτο submission & βάσεις (Παρ 21:00–02:00)
@@ -114,7 +116,7 @@
 - [x] Σελίδες **Customer detail** και **Evaluation** — τις έκανε ο Δημήτρης (`/customers`, `/customers/[trdr]`, `/evaluation`)
 - [x] Σελίδα **Overview** (Δημήτρης)
 - [x] Σελίδα **Voice Operations** (Δημήτρης — διαβάζει `GET /api/calls`, κουμπί → `POST {VOICE_URL}/voice/calls`) (ουρά κλήσεων, status, transcript, draft id) + κουμπί «Κάλεσε τον πωλητή»
-- [ ] Voice edge cases: voicemail, κλείσιμο γραμμής, «15» vs «50», διπλό webhook → **ποτέ** διπλό draft· allowlist, quiet hours, AI disclosure
+- [x] Voice edge cases: τηλεφωνητής, κλείσιμο γραμμής, αριθμοί με λέξεις, διπλή επιβεβαίωση → **ποτέ** διπλό draft· allowlist, ώρες ησυχίας, δήλωση AI (`apps/voice/tests`, `scripts/check_voice_vs_api.py`)
 
 ### Φάση 4 — Τελικά (Κυρ 08:00–13:00)
 **Δημήτρης**: τελικό submission (ξανατρέξιμο από καθαρό clone), `docs/RESULTS.md`, README, run-all script

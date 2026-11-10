@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export ERP_BASE_URL="${ERP_BASE_URL:-http://localhost:8080}"
 
 echo "▶ Mock ERP :8080"
-python3 "$ROOT/team_pack/mock_erp_server.py" --port 8080 &
+python3 "$ROOT/scripts/mock_erp_local.py" --port 8080 &   # το επίσημο mock, δεμένο μόνο στο 127.0.0.1
 ERP_PID=$!
 trap 'kill $ERP_PID 2>/dev/null' EXIT
 for _ in $(seq 1 50); do curl -sf "$ERP_BASE_URL/api/salesmen" >/dev/null && break; sleep 0.1; done

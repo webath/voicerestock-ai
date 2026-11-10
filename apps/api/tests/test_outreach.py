@@ -192,9 +192,9 @@ def test_apifon_auto_falls_back_to_hmac():
 
 # ---------------- επαφές πελατών: CSV, demo/live, μασκάρισμα ----------------
 def test_normalize_phone():
-    assert normalize_phone("694 715 0522") == "306947150522"
-    assert normalize_phone("+30 694-715-0522") == "306947150522"
-    assert normalize_phone("00306947150522") == "306947150522"
+    assert normalize_phone("690 000 0522") == "306900000522"
+    assert normalize_phone("+30 690-000-0522") == "306900000522"
+    assert normalize_phone("00306900000522") == "306900000522"
     assert normalize_phone("2101234567") == "302101234567"
     assert normalize_phone("12345") is None and normalize_phone("abc") is None
 
@@ -204,7 +204,7 @@ def test_contacts_import_reports_bad_rows_and_masks(env):
     e, it, t = seasonal_target(c)
     code = next(x["CODE"] for x in c.get("/api/customers").json() if x["TRDR"] == t["TRDR"])
     csv = ("TRDR;CODE;NAME;PHONE;EMAIL\n"
-           f"{t['TRDR']};;x;6947150522;Owner@Example.com\n"      # με TRDR
+           f"{t['TRDR']};;x;6900000522;Owner@Example.com\n"      # με TRDR
            f";{code};x;;second@example.com\n"                    # ίδιος πελάτης με CODE: το κενό κινητό δεν σβήνει το παλιό
            "999999;;x;6900000000;\n"                              # άγνωστος πελάτης
            f"{it['targets'][1]['TRDR']};;x;123;\n"                # άκυρο κινητό
@@ -216,8 +216,8 @@ def test_contacts_import_reports_bad_rows_and_masks(env):
     assert rep["imported"] == 2 and rep["error_count"] == 3 and rep["skipped_empty"] == 1
     assert [x["row"] for x in rep["errors"]] == [4, 5, 6] and rep["with_phone"] == 1 and rep["with_email"] == 1
     me = next(x for x in c.get("/api/customers").json() if x["TRDR"] == t["TRDR"])
-    assert me["contact"] == {"phone": "+30694•••0522", "email": "second@example.com", "updated_at": me["contact"]["updated_at"]}
-    assert "306947150522" not in c.get("/api/customers").text          # το κινητό δεν φεύγει ποτέ ολόκληρο
+    assert me["contact"] == {"phone": "+30690•••0522", "email": "second@example.com", "updated_at": me["contact"]["updated_at"]}
+    assert "306900000522" not in c.get("/api/customers").text          # το κινητό δεν φεύγει ποτέ ολόκληρο
     assert c.get("/api/campaigns").json()["emails"][str(t["TRDR"])] == "second@example.com"
     assert c.post("/api/contacts/import", json={"csv": "NAME;PHONE\nx;6900000000"}).status_code == 400
 
@@ -228,15 +228,15 @@ def test_live_mode_sends_to_the_customer_and_never_falls_back(env):
     other = it["targets"][1]
     body = {"kind": "seasonal", "mtrl": it["MTRL"], "event": e["event"], "text": "Γεια"}
     assert c.put("/api/contacts/mode", json={"mode": "live", "confirm": True}).status_code == 409     # χωρίς καμία επαφή
-    assert c.put(f"/api/contacts/{t['TRDR']}", json={"phone": "6947150522"}).json()["phone"] == "+30694•••0522"
+    assert c.put(f"/api/contacts/{t['TRDR']}", json={"phone": "6900000522"}).json()["phone"] == "+30690•••0522"
     assert c.put(f"/api/contacts/{t['TRDR']}", json={"phone": "12"}).status_code == 400
     kept = c.put(f"/api/contacts/{t['TRDR']}", json={"email": "a@b.gr"}).json()                       # μόνο email → το κινητό μένει
-    assert kept["phone"] == "+30694•••0522" and kept["email"] == "a@b.gr"
+    assert kept["phone"] == "+30690•••0522" and kept["email"] == "a@b.gr"
     assert c.put("/api/contacts/mode", json={"mode": "live"}).status_code == 400                      # χωρίς confirm
     assert c.put("/api/contacts/mode", json={"mode": "live", "confirm": True}).json()["mode"] == "live"
     r = c.post("/api/campaigns/sms/send", json={**body, "trdr": t["TRDR"], "idempotency_key": "live-1"})
     assert r.status_code == 200 and r.json()["phone_source"] == "customer"
-    assert json.loads(http.calls[-1]["content"])["subscribers"] == [{"number": "306947150522"}]
+    assert json.loads(http.calls[-1]["content"])["subscribers"] == [{"number": "306900000522"}]
     # πελάτης χωρίς κινητό: ΔΕΝ πάει στο demo κινητό
     r = c.post("/api/campaigns/sms/send", json={**body, "trdr": other["TRDR"], "idempotency_key": "live-2"})
     assert r.status_code == 400 and "Πελάτες" in r.json()["message"] and len(http.calls) == 1

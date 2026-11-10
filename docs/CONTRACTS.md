@@ -199,3 +199,15 @@ proposed|modified ──▶ cancelled
 - Audit events `forecast_created`, `forecast_updated`, `forecast_withdrawn` και υπάρχοντα quantity/confirm/create-draft/cancel.
 - Call transcript entries διατηρούν προαιρετικά `suggestion_id` και `type`. `type: confirmation`, `role: user` καταγράφει την απάντηση που πέρασε τον έλεγχο της φωνής, πριν το confirm/create-draft. Δεν αποδεικνύει από μόνο του επιτυχημένο ERP write.
 - Το mock υποστηρίζει και τα δύο read endpoints με τα δικά του δεδομένα. Δεν τρέχει forecast reconciliation· `changes: {}`.
+
+## Επαφές πελατών & λειτουργία SMS (dashboard ↔ App API· ο voice agent δεν τα χρησιμοποιεί)
+
+- `GET /api/contacts` → `{mode: "demo"|"live", total_customers, with_phone, with_email, demo_to}` (`demo_to` μασκαρισμένο).
+- `POST /api/contacts/import` `{csv}` → upsert. Στήλες `TRDR` ή `CODE`, και `PHONE` ή/και `EMAIL` («;» ή «,»).
+  Απάντηση: `{imported, skipped_empty, error_count, errors: [{row, error}], …state}`. Άκυρες γραμμές δεν εισάγονται.
+- `PUT /api/contacts/{trdr}` `{phone?, email?}` → πεδίο που λείπει μένει ως έχει· `null`/κενό το σβήνει. Απάντηση `{phone, email, updated_at}`.
+- `PUT /api/contacts/mode` `{mode, confirm}` → το `live` θέλει `confirm: true` και τουλάχιστον ένα κινητό (αλλιώς 400 / 409).
+- `POST /api/contacts/clear` → σβήνει όλες τις επαφές και γυρνά σε `demo`.
+- `GET /api/customers[/{trdr}]`: κάθε πελάτης έχει `contact: {phone, email, updated_at}`· το `phone` **πάντα μασκαρισμένο** (`+30694•••0522`).
+- `GET /api/market`: επιπλέον `paused`, `max_searches`· κάθε ολοκληρωμένη έρευνα έχει `cost_usd` (εκτίμηση) και `usage`.
+
