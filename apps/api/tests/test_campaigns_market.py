@@ -67,7 +67,7 @@ def make(tmp_path, monkeypatch):
     def _make(client=None, creds=True):
         scanner = MarketScanner(lambda: _campaigns().internal_snapshot(), every_days=0,
                                 client_factory=lambda: client, credentials=lambda: creds)
-        return TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), market=scanner))
+        return TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), market=scanner), headers={"X-Actor": "test"})
     return _make
 
 

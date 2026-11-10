@@ -29,7 +29,7 @@ def env(tmp_path, monkeypatch):
     shutil.copy(PROCESSED / "suggestions.json", seed)
     erp = FakeERP()
     monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
-    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), erp))
+    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), erp), headers={"X-Actor": "test"})
     sid = c.get("/api/suggestions").json()[0]["id"]
     return c, erp, sid
 
@@ -234,7 +234,7 @@ def make_agent_env(tmp_path, monkeypatch, ok=True, slow=0.0):
     monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
     runner = AgentRunner(on_finish=None, cmd=lambda trig: [sys.executable, "-c", FAKE_AGENT, "ok" if ok else "fail", str(slow)],
                          runs_file=tmp_path / "runs.json", schedule="")
-    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), runner))
+    c = TestClient(create_app(Store(tmp_path / "s.sqlite", seed), FakeERP(), runner), headers={"X-Actor": "test"})
     return c, runner
 
 
@@ -285,3 +285,80 @@ def test_agent_conflict_and_failure(tmp_path, monkeypatch):
     assert st["last"]["status"] == "error"
     assert "handoff" not in st["last"]["steps"]                   # αποτυχία → τίποτα δεν δημοσιεύεται/φορτώνεται
     assert st["last"]["steps"]["validate"]["status"] == "error"
+
+
+# ---------------- προσομοίωση κλήσης ----------------
+@pytest.fixture
+def sim_env(tmp_path, monkeypatch):
+    seed = tmp_path / "suggestions.json"
+    shutil.copy(PROCESSED / "suggestions.json", seed)
+    erp = FakeERP()
+    monkeypatch.setattr(explain_mod, "_get_client", lambda: None)
+    app = create_app(Store(tmp_path / "s.sqlite", seed), erp, sim_pace=0)
+    return TestClient(app, headers={"X-Actor": "test"}), erp, app
+
+
+def test_simulated_call_reaches_draft_for_most_urgent_customer(sim_env):
+    from app.simulate import priority_of
+    c, erp, app = sim_env
+    r = c.post("/api/calls/simulate", json={"salesman": 105})
+    assert r.status_code == 202
+    out = r.json()
+    assert out["call_sid"].startswith("SIM-") and out["priority"] == "critical"
+    for _ in range(200):                     # το thread τελειώνει αμέσως με pace=0
+        if app.state.sim.running is None:
+            break
+        import time; time.sleep(0.01)
+    call = next(x for x in c.get("/api/calls").json() if x["call_sid"] == out["call_sid"])
+    assert call["status"] == "draft_created" and call["salesman"] == 105
+    assert call["erp_draft_ids"] == ["DRAFT-TEST-0001"] and len(erp.calls) == 1
+    text = " ".join(t["text"] for t in call["transcript"])
+    assert out["customer"] in text and "AI" in text and "επιβεβαιώνω" in text
+    s = c.get(f"/api/suggestions/{out['suggestion_id']}").json()
+    assert s["status"] == "draft_created" and s["version"] == 2       # άλλαξε μία ποσότητα → v2
+    assert any(a["actor"] == "voice:sim" and a["action"] == "create-draft" for a in c.get("/api/audit").json())
+    # δεύτερη προσομοίωση → επόμενος πελάτης (ο πρώτος έχει ήδη draft)
+    out2 = app.state.sim.start(105, wait=True)
+    assert out2["suggestion_id"] != out["suggestion_id"] and len(erp.calls) == 2
+    assert priority_of(c.get(f"/api/suggestions/{out2['suggestion_id']}").json()) in ("critical", "high", "medium", "low")
+
+
+def test_simulated_call_rejects_unknown_salesman(sim_env):
+    c, _, _ = sim_env
+    r = c.post("/api/calls/simulate", json={"salesman": 999999})
+    assert r.status_code == 409 and r.json()["error"] == "no_suggestion"
+
+
+# ---------------- live κλήση demo: ένα προϊόν ----------------
+def test_voice_focus_one_product_end_to_end(sim_env):
+    c, erp, app = sim_env
+    r = c.post("/api/calls/focus", json={"salesman": 105})
+    assert r.status_code == 200
+    f = r.json()
+    s = c.get(f"/api/suggestions/{f['suggestion_id']}").json()
+    assert len(s["LINES"]) == 1 and s["LINES"][0]["ITEM_NAME"] == f["item"] and s["version"] == 2
+    # ο voice agent βλέπει ΜΟΝΟ αυτήν· το dashboard όλες
+    voice = {"X-Actor": "voice:vr-105-test"}
+    v = c.get("/api/suggestions?salesman=105", headers=voice).json()
+    assert [x["id"] for x in v] == [f["suggestion_id"]]
+    assert len(c.get("/api/suggestions?salesman=105").json()) > 1
+    # περίληψη → «ναι» → draft με ένα είδος
+    tok = c.post(f"/api/suggestions/{f['suggestion_id']}/confirm", json={"version": 2}, headers=voice).json()["confirmation_token"]
+    d = c.post(f"/api/suggestions/{f['suggestion_id']}/create-draft",
+               json={"confirmation_token": tok, "idempotency_key": "vr-105-test:1"}, headers=voice)
+    assert d.status_code == 200 and len(erp.calls) == 1 and len(erp.calls[0]["LINES"]) == 1
+    # μετά το draft η εστίαση σβήνει → ο agent ξαναβλέπει τις υπόλοιπες ανοιχτές
+    assert len(c.get("/api/suggestions?salesman=105", headers=voice).json()) > 1
+
+
+def test_voice_focus_unknown_salesman(sim_env):
+    c, _, _ = sim_env
+    assert c.post("/api/calls/focus", json={"salesman": 999999}).json()["error"] == "no_suggestion"
+
+
+def test_reset_clears_voice_focus(sim_env):
+    c, _, _ = sim_env
+    c.post("/api/calls/focus", json={"salesman": 105})
+    c.post("/api/admin/reset")
+    v = c.get("/api/suggestions?salesman=105", headers={"X-Actor": "voice:x"}).json()
+    assert len(v) > 1 and all(len(s["LINES"]) >= 1 for s in v)

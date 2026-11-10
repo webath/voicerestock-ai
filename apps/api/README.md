@@ -18,6 +18,7 @@ uv run pytest                       # 7 tests (fake ERP, χωρίς δίκτυο
 | `app/explain.py` | Ελληνική εξήγηση με Claude (`claude-opus-5-5`, effort `low`, server-side fallback). Χωρίς `ANTHROPIC_API_KEY` → template από τα ίδια πεδία |
 | `app/campaigns.py` | `GET /api/campaigns`: εποχικές προσφορές (γιορτές + Ορθόδοξο Πάσχα), προτάσεις τιμών, ειδοποιήσεις «ο κύκλος έσπασε», απόδοση προσφορών — μόνο από τα τιμολόγια, χωρίς LLM |
 | `app/market.py` | Market Scan: Claude + web search κάθε `MARKET_SCAN_EVERY_DAYS` (7) μέρες ή `POST /api/market/scan` → `GET /api/market`. Αποθήκευση `data/processed/market_scans.json`. Χωρίς `ANTHROPIC_API_KEY` → η σελίδα λέει τι λείπει |
+| `app/outreach.py` | Αλλαγές χρήστη σε τιμές/εκπτώσεις (`PUT /api/campaigns/prices/{mtrl}`, `PUT /api/campaigns/discounts`) και SMS προσφοράς: `POST /api/campaigns/sms/draft` (κείμενο από Claude με έλεγχο αριθμών, αλλιώς πρότυπο) → `POST /api/campaigns/sms/send` (Apifon, HMAC, idempotency key). Κινητό: `SMS_DEMO_TO` ή `CUSTOMER_<TRDR>_PHONE` |
 
 Εγγυήσεις:
 - **Exactly-once draft:** το POST στο ERP γίνεται μέσα σε lock· ίδιο `idempotency_key` ή ήδη `draft_created` → ίδιο `erp_draft_id`, κανένα δεύτερο write.

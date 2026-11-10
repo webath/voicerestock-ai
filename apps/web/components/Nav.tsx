@@ -26,9 +26,9 @@ export function NavFrame({ path }: { path: string | null }) {
   return (
     <header className="glass-bar sticky top-0 z-30">
       <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-        <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight text-ink">
-          <Logo />
-          <span title="Voice Ordering & Restock Assistant">VORA<span className="hidden text-ink-muted font-normal lg:inline"> · Voice Ordering & Restock Assistant</span></span>
+        <Link href="/" className="flex items-center gap-3 tracking-tight" title="Voice Ordering & Restock Assistant">
+          <span className="vora-mark"><span className="vora-word" data-text="VORA">VORA</span></span>
+          <span className="hidden text-ink-muted lg:inline">Voice Ordering & Restock Assistant</span>
         </Link>
         <div className="seg -mx-1 max-w-full overflow-x-auto">
           {NAV.map((n) => (
@@ -44,19 +44,3 @@ export function NavFrame({ path }: { path: string | null }) {
   );
 }
 
-function Logo() {
-  // Σταγόνα/μπουκάλι σε γυαλί — ο διανομέας νερών & ποτών.
-  return (
-    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden>
-      <defs>
-        <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--series-1)" stopOpacity="0.95" />
-          <stop offset="1" stopColor="#1baf7a" stopOpacity="0.85" />
-        </linearGradient>
-      </defs>
-      <rect x="1" y="1" width="24" height="24" rx="8" fill="url(#lg)" />
-      <path d="M13 6.5c2.6 3.2 4.2 5.6 4.2 7.6a4.2 4.2 0 1 1-8.4 0c0-2 1.6-4.4 4.2-7.6z" fill="white" fillOpacity="0.92" />
-      <path d="M11.2 14.6a1.9 1.9 0 0 0 1.9 1.9" stroke="url(#lg)" strokeWidth="1.4" strokeLinecap="round" fill="none" />
-    </svg>
-  );
-}

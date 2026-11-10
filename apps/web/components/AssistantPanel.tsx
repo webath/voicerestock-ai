@@ -60,7 +60,7 @@ export function AssistantPanel() {
     const patch = (f: (m: Msg) => Msg) => setMsgs((ms) => [...ms.slice(0, -1), f(ms[ms.length - 1])]);
     try {
       const r = await fetch(`${API_URL}/api/assistant`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", "X-Actor": "dashboard" },
         body: JSON.stringify({ messages: history, salesman: salesman ? Number(salesman) : null }),
       });
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
