@@ -31,7 +31,7 @@ def env(tmp_path):
     seed.write_text(json.dumps(data))
     store = Store(tmp_path / "state.sqlite", seed)
     erp = ERP()
-    return TestClient(create_app(store, erp)), store, erp, data, seed
+    return TestClient(create_app(store, erp), headers={"X-Actor": "test"}), store, erp, data, seed
 
 
 def approve(c, s, key="original"):
