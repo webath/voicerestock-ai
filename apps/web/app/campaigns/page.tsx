@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 import { Card, Chip, EmptyState, ErrorBox, Loading, PageHeader, Segmented, StatTile } from "@/components/ui";
 import { useToast } from "@/components/Toast";
-import { API_URL, ApiError, apiPost, useApi } from "@/lib/api";
+import { apiPost, apiPut, useApi } from "@/lib/api";
 import { fmt1, fmtDay, fmtDayLong, fmtEur, fmtEur2, fmtNum } from "@/lib/format";
 
 // Owner: Νίκος. Δεδομένα: GET /api/campaigns (apps/api/app/campaigns.py, χωρίς LLM) + αλλαγές χρήστη και SMS (app/outreach.py).
@@ -31,19 +31,14 @@ interface Promo { PROMO: number; NAME: string; CATEGORY: string; FROM: string; T
 interface Report {
   today: string; data_until: string; seasonal: SeasonalEvent[]; pricing: Pricing[]; alerts: Alert[]; promos: Promo[];
   sms_sent: Record<string, { kind: string; MTRL: number | null; at: string }[]>;
-  sms: { configured: boolean; sender: string; demo_to: string | null };
+  sms: { configured: boolean; sender: string; demo_to: string | null; mode: "demo" | "live"; with_phone: number; total_customers: number };
+  emails: Record<string, string>;
 }
 interface SmsReq { kind: "seasonal" | "price_promo" | "winback"; trdr: number; mtrl?: number; event?: string; customer: string }
 type OnSms = (s: SmsReq) => void;
+interface EmailReq { subject: string; body: string; to: string; trdr: number }
+const emailOf = (emails: Record<string, string>, trdr: number) => emails[String(trdr)] ?? null;
 
-async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(`${API_URL}${path}`, {
-    method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": "dashboard" }, body: JSON.stringify(body),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ApiError(r.status, data.error ?? "error", data.message ?? `${r.status}`);
-  return data as T;
-}
 
 type Tab = "seasonal" | "pricing" | "alerts" | "promos";
 const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(Math.round(v * 100))}%`;
@@ -55,7 +50,7 @@ const icon = (name: string) => Object.entries(ICON).find(([k]) => name.startsWit
 export default function CampaignsPage() {
   const r = useApi<Report>("/api/campaigns");
   const [tab, setTab] = useState<Tab>("seasonal");
-  const [email, setEmail] = useState<{ subject: string; body: string; to: string } | null>(null);
+  const [email, setEmail] = useState<EmailReq | null>(null);
   const [sms, setSms] = useState<SmsReq | null>(null);
 
   if (r.error) return <ErrorBox message={r.error} />;
@@ -73,7 +68,10 @@ export default function CampaignsPage() {
       <div className="fade-in mb-5 flex flex-wrap items-center gap-2 text-sm text-ink-2">
         <span aria-hidden>📱</span>
         {d.sms.configured
-          ? <>SMS μέσω Apifon (αποστολέας «{d.sms.sender}»){d.sms.demo_to && <> · <strong className="text-ink">demo:</strong> όλα τα SMS πηγαίνουν στο {d.sms.demo_to}</>}</>
+          ? <>SMS μέσω Apifon (αποστολέας «{d.sms.sender}») · {d.sms.mode === "live"
+              ? <><strong className="text-ink">πραγματικά:</strong> κάθε SMS πάει στο κινητό του πελάτη ({d.sms.with_phone}/{d.sms.total_customers} έχουν κινητό)</>
+              : <><strong className="text-ink">demo:</strong> όλα τα SMS πηγαίνουν στο {d.sms.demo_to ?? "— (λείπει SMS_DEMO_TO)"}</>}
+              {" · "}<Link href="/customers" className="underline hover:text-ink">επαφές πελατών</Link></>
           : <>Τα SMS θέλουν στοιχεία Apifon στο <code>.env</code> (APIFON_TOKEN, APIFON_SECRET) — μέχρι τότε βλέπεις μόνο το κείμενο.</>}
       </div>
 
@@ -99,7 +97,7 @@ export default function CampaignsPage() {
       {tab === "pricing" && <PricingTable rows={d.pricing} sent={d.sms_sent} onSms={setSms} onSaved={r.reload} />}
       {tab === "alerts" && <Alerts rows={d.alerts} sent={d.sms_sent} onEmail={setEmail} onSms={setSms} />}
       {tab === "promos" && <Promos rows={d.promos} />}
-      {email && <EmailDraft {...email} onClose={() => setEmail(null)} />}
+      {email && <EmailDraft {...email} address={emailOf(d.emails, email.trdr)} onClose={() => setEmail(null)} />}
       {sms && <SmsDraft req={sms} onClose={() => setSms(null)} onSent={r.reload} />}
     </>
   );
@@ -111,7 +109,7 @@ const wasSent = (sent: Sent, trdr: number, kind: string, mtrl?: number) =>
   (sent[String(trdr)] ?? []).some((s) => s.kind === kind && (mtrl == null || s.MTRL === mtrl));
 
 function Seasonal({ events, sent, onEmail, onSms, onSaved }: {
-  events: SeasonalEvent[]; sent: Sent; onEmail: (e: { subject: string; body: string; to: string }) => void; onSms: OnSms; onSaved: () => void;
+  events: SeasonalEvent[]; sent: Sent; onEmail: (e: EmailReq) => void; onSms: OnSms; onSaved: () => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   if (!events.length) return <EmptyState title="Καμία γιορτή με ιστορική άνοδο στους επόμενους μήνες" />;
@@ -256,7 +254,7 @@ function PricingTable({ rows, sent, onSms, onSaved }: { rows: Pricing[]; sent: S
 }
 
 // ---------------- ειδοποιήσεις κύκλου ----------------
-function Alerts({ rows, sent, onEmail, onSms }: { rows: Alert[]; sent: Sent; onEmail: (e: { subject: string; body: string; to: string }) => void; onSms: OnSms }) {
+function Alerts({ rows, sent, onEmail, onSms }: { rows: Alert[]; sent: Sent; onEmail: (e: EmailReq) => void; onSms: OnSms }) {
   const [sev, setSev] = useState<"high" | "all">("high");
   const shown = rows.filter((a) => sev === "all" || a.severity === "high");
   if (!rows.length) return <EmptyState title="Κανένας κύκλος δεν έσπασε" />;
@@ -335,7 +333,7 @@ function Promos({ rows }: { rows: Promo[] }) {
 function seasonalEmail(e: SeasonalEvent, it: SeasonalItem, t: Customer & { past_qty: number }) {
   const event = e.event.split(" & ")[0];
   return {
-    to: t.CUSTOMER_NAME,
+    to: t.CUSTOMER_NAME, trdr: t.TRDR,
     subject: `Προσφορά −${fmtNum(it.suggested_disc)}% για ${event}: ${it.ITEM_NAME}`,
     body: `Καλησπέρα σας,
 
@@ -353,7 +351,7 @@ DEMO ΔΙΑΝΟΜΕΣ Α.Ε.`,
 function winbackEmail(a: Alert) {
   const names = a.items.slice(0, 3).map((i) => `«${i.ITEM_NAME}»`).join(", ");
   return {
-    to: a.CUSTOMER_NAME,
+    to: a.CUSTOMER_NAME, trdr: a.TRDR,
     subject: a.kind === "lost" ? `${a.CUSTOMER_NAME}: μας λείψατε` : `${a.CUSTOMER_NAME}: ειδική τιμή για ${a.items_broken === 1 ? "ένα είδος" : "είδη"} που παίρνατε`,
     body: `Καλησπέρα σας,
 
@@ -368,7 +366,7 @@ DEMO ΔΙΑΝΟΜΕΣ Α.Ε.`,
   };
 }
 
-function EmailDraft({ to, subject, body, onClose }: { to: string; subject: string; body: string; onClose: () => void }) {
+function EmailDraft({ to, subject, body, address, onClose }: { to: string; subject: string; body: string; address: string | null; onClose: () => void }) {
   const toast = useToast();
   const [text, setText] = useState(body);
   useEffect(() => {
@@ -389,14 +387,14 @@ function EmailDraft({ to, subject, body, onClose }: { to: string; subject: strin
       <div className="card w-full max-w-xl p-5" role="dialog" aria-modal aria-label="Email προς πελάτη" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-xs text-ink-muted">Προς: {to} · το στέλνει ο πωλητής</div>
+            <div className="text-xs text-ink-muted">Προς: {to}{address ? ` <${address}>` : " · δεν υπάρχει email (πρόσθεσέ το στους Πελάτες)"} · το στέλνει ο πωλητής</div>
             <h2 className="mt-0.5 text-base font-semibold text-ink">{subject}</h2>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Κλείσιμο">✕</button>
         </div>
         <textarea className="field mt-3 !h-72 w-full resize-y py-2 leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} aria-label="Κείμενο email" />
         <div className="mt-3 flex flex-wrap justify-end gap-2">
-          <a className="btn" href={`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`}>Άνοιγμα στο email</a>
+          <a className="btn" href={`mailto:${address ? encodeURIComponent(address) : ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`}>Άνοιγμα στο email</a>
           <button type="button" className="btn btn-primary" onClick={copy}>Αντιγραφή</button>
         </div>
       </div>

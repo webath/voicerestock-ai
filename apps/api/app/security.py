@@ -34,6 +34,8 @@ RATE_LIMITS: list[tuple[str, re.Pattern, int, int]] = [
     ("POST", re.compile(r"^/api/suggestions/[^/]+/customer-message$"), 20, 60),
     ("POST", re.compile(r"^/api/suggestions/[^/]+/create-draft$"), 30, 60),  # γράφει στο ERP
     ("POST", re.compile(r"^/api/admin/reset$"), 3, 60),
+    ("POST", re.compile(r"^/api/contacts/(import|clear)$"), 10, 60),      # μαζικές αλλαγές σε προσωπικά δεδομένα
+    ("POST", re.compile(r"^/api/market/scan$"), 3, 60),                   # κάθε έρευνα κοστίζει
 ]
 
 SECURITY_HEADERS = [

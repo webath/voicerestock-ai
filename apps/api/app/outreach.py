@@ -126,13 +126,14 @@ def _digits(phone: str) -> str:
     return d[2:] if d.startswith("00") else d
 
 
-def phone_for(trdr: int) -> tuple[str | None, str]:
-    """(αριθμός Apifon χωρίς +, από πού ήρθε). Demo: όλα στο SMS_DEMO_TO."""
-    demo = os.environ.get("SMS_DEMO_TO", "").strip()
-    if demo:
-        return _digits(demo), "demo"
-    own = os.environ.get(f"CUSTOMER_{trdr}_PHONE", "").strip()
-    return (_digits(own), "customer") if own else (None, "none")
+def phone_for(trdr: int, contacts=None) -> tuple[str | None, str]:
+    """(αριθμός Apifon χωρίς +, πηγή). demo → όλα στο SMS_DEMO_TO· live → το κινητό του ίδιου του πελάτη
+    (σελίδα Πελάτες, αλλιώς CUSTOMER_<TRDR>_PHONE). Ποτέ σιωπηλή επιστροφή από live σε demo κινητό."""
+    if contacts is None or contacts.mode == "demo":
+        demo = os.environ.get("SMS_DEMO_TO", "").strip()
+        return (_digits(demo), "demo") if demo else (None, "none")
+    own = contacts.phone(trdr) or _digits(os.environ.get(f"CUSTOMER_{trdr}_PHONE", "").strip())
+    return (own, "customer") if own else (None, "none")
 
 
 def mask(number: str | None) -> str | None:

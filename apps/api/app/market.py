@@ -30,7 +30,25 @@ log = logging.getLogger("market")
 MODEL = os.environ.get("MARKET_MODEL", "claude-opus-5-5")
 SCANS_FILE = PROCESSED / "market_scans.json"
 KEEP = 12
-MAX_SEARCHES = 15
+MAX_SEARCHES = int(os.environ.get("MARKET_MAX_SEARCHES", "8") or 8)   # κάθε αναζήτηση φορτώνει σελίδες στο context = κόστος
+RETRY_AFTER_ERROR_H = 24      # αποτυχημένη προγραμματισμένη έρευνα: ξανά σε μία μέρα, όχι κάθε ώρα
+MAX_AUTO_ERRORS = 3           # μετά από τόσες συνεχόμενες αποτυχίες σταματά μόνη της· ξεκινά ξανά με το κουμπί
+# $ ανά 1M tokens (είσοδος, έξοδος, ανάγνωση cache, εγγραφή cache) — μόνο για εκτίμηση κόστους στο dashboard
+PRICES = {"claude-opus-5-5": (4.0, 20.0, 0.20, 5.0), "claude-sonnet-5-5": (2.0, 10.0, 0.20, 2.5)}
+USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+
+
+def _usage(u) -> dict:
+    return {k: int(getattr(u, k, 0) or 0) for k in USAGE_KEYS}
+
+
+def _cost(usage: dict, searches: int) -> float | None:
+    p = PRICES.get(MODEL)
+    if not p:
+        return None
+    tok = (usage.get("input_tokens", 0) * p[0] + usage.get("output_tokens", 0) * p[1]
+           + usage.get("cache_read_input_tokens", 0) * p[2] + usage.get("cache_creation_input_tokens", 0) * p[3]) / 1e6
+    return round(tok + searches * 0.01, 2)                   # web search: $10 ανά 1.000 αναζητήσεις
 FALLBACK = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
 
 RESEARCH_SYSTEM = """Είσαι αναλυτής αγοράς για την DEMO ΔΙΑΝΟΜΕΣ Α.Ε., χονδρέμπορο στην Ελλάδα που διανέμει νερά, αναψυκτικά,
@@ -127,13 +145,26 @@ class MarketScanner:
     def _last_ok(self) -> dict | None:
         return next((s for s in self.scans if s.get("status") == "done"), None)
 
+    def _errors_in_a_row(self) -> list[dict]:
+        out = []
+        for s in self.scans:                                 # νεότερη πρώτη
+            if s.get("status") != "error":
+                break
+            out.append(s)
+        return out
+
+    def paused(self) -> bool:
+        """Συνεχόμενες αποτυχίες → ο χρονοπρογραμματισμός σταματά (όχι άσκοπες χρεώσεις/θόρυβος κάθε ώρα)."""
+        return len(self._errors_in_a_row()) >= MAX_AUTO_ERRORS
+
     def next_run_at(self) -> str | None:
-        if self.every_days <= 0:
+        if self.every_days <= 0 or self.paused():
             return None
-        last = self._last_ok()
-        if not last:
-            return _now()
-        t = datetime.fromisoformat(last["started_at"].replace("Z", "+00:00")) + timedelta(days=self.every_days)
+        ts = lambda s: datetime.fromisoformat(s["started_at"].replace("Z", "+00:00"))  # noqa: E731
+        last, errs = self._last_ok(), self._errors_in_a_row()
+        t = ts(last) + timedelta(days=self.every_days) if last else datetime.now(timezone.utc)
+        if errs:
+            t = max(t, ts(errs[0]) + timedelta(hours=RETRY_AFTER_ERROR_H))
         return t.isoformat(timespec="seconds").replace("+00:00", "Z")
 
     def state(self, scan_id: str | None = None) -> dict:
@@ -142,7 +173,8 @@ class MarketScanner:
                                                                                                   (self.scans[0] if self.scans else None))
             return {"running": self.current is not None, "current": self.current,
                     "has_credentials": self.credentials(), "model": MODEL,
-                    "every_days": self.every_days, "next_run_at": self.next_run_at(),
+                    "every_days": self.every_days, "next_run_at": self.next_run_at(), "paused": self.paused(),
+                    "max_searches": MAX_SEARCHES,
                     "scan": chosen,
                     "history": [{k: s.get(k) for k in ("id", "trigger", "started_at", "finished_at", "status", "error")}
                                 for s in self.scans]}
@@ -180,7 +212,8 @@ class MarketScanner:
                     row["sources"] = sorted({i for i in row.get("sources", []) if 1 <= i <= n})
             run.update(status="done", report=report, notes=notes, searches=searches,
                        sources=[{"i": i + 1, **s} for i, s in enumerate(sources)],
-                       internal=internal, usage={k: usage.get(k, 0) + u2.get(k, 0) for k in ("input_tokens", "output_tokens")})
+                       internal=internal, usage={k: usage.get(k, 0) + u2.get(k, 0) for k in USAGE_KEYS})
+            run["cost_usd"] = _cost(run["usage"], searches)
         except Exception as e:                                   # το dashboard δείχνει το λάθος· ο server συνεχίζει
             log.exception("market scan failed")
             run.update(status="error", error=_friendly(e))
@@ -199,17 +232,19 @@ class MarketScanner:
                   # Χωρίς "country": το web search απορρίπτει το «GR» (400 «Country code GR is not supported»)·
                   # η ελληνική αγορά ορίζεται από το RESEARCH_SYSTEM.
                   "user_location": {"type": "approximate", "city": "Athens", "timezone": "Europe/Athens"}}]
-        texts, sources, seen, searches, usage = [], [], {}, 0, {"input_tokens": 0, "output_tokens": 0}
+        texts, sources, seen, searches, usage = [], [], {}, 0, dict.fromkeys(USAGE_KEYS, 0)
         for _ in range(4):                                       # pause_turn → συνέχεια, ως 4 γύροι
+            # cache_control: στη συνέχεια μετά από pause_turn τα αποτελέσματα που ήδη διαβάστηκαν χρεώνονται ως cache
             r = client.beta.messages.create(model=MODEL, max_tokens=16000, system=RESEARCH_SYSTEM, tools=tools,
-                                            messages=messages, output_config={"effort": "medium"}, **FALLBACK)
-            usage["input_tokens"] += r.usage.input_tokens
-            usage["output_tokens"] += r.usage.output_tokens
+                                            messages=messages, output_config={"effort": "medium"},
+                                            cache_control={"type": "ephemeral"}, **FALLBACK)
+            for k, v in _usage(r.usage).items():
+                usage[k] += v
             if r.stop_reason == "refusal":
                 raise RuntimeError("Το μοντέλο αρνήθηκε την έρευνα.")
             for b in r.content:
-                if b.type == "server_tool_use":
-                    searches += 1
+                if b.type == "server_tool_use" and getattr(b, "name", "web_search") == "web_search":
+                    searches += 1                                # όχι τα βήματα φιλτραρίσματος (code execution)
                 elif b.type == "web_search_tool_result" and isinstance(b.content, list):
                     for res in b.content:
                         _add(sources, seen, getattr(res, "url", None), getattr(res, "title", None), getattr(res, "page_age", None))
@@ -237,7 +272,7 @@ class MarketScanner:
         if r.stop_reason == "max_tokens":
             raise RuntimeError("Η αναφορά κόπηκε (max_tokens).")
         text = next(b.text for b in r.content if b.type == "text")
-        return json.loads(text), {"input_tokens": r.usage.input_tokens, "output_tokens": r.usage.output_tokens}
+        return json.loads(text), _usage(r.usage)
 
     # ---------- εβδομαδιαίο ----------
     def _scheduler(self) -> None:

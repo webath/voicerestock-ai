@@ -97,6 +97,12 @@ export interface Customer {
   SALESMAN_NAME: string | null;
   INSDATE: string;
   cold_start: boolean;
+  contact?: { phone: string | null; email: string | null; updated_at?: string | null };   // κινητό πάντα μασκαρισμένο
+}
+
+/** Επαφές πελατών & λειτουργία SMS (GET /api/contacts). demo = όλα στο demo κινητό· live = στον ίδιο τον πελάτη. */
+export interface ContactsState {
+  mode: "demo" | "live"; total_customers: number; with_phone: number; with_email: number; demo_to: string | null;
 }
 
 export interface Forecast {
@@ -186,6 +192,15 @@ export async function apiPost<T>(path: string, body: unknown = {}, base = API_UR
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Actor": "dashboard", ...extraHeaders },
     body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(r.status, data.error ?? "error", data.message ?? data.detail?.[0]?.msg ?? `${r.status}`);
+  return data as T;
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${API_URL}${path}`, {
+    method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": "dashboard" }, body: JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new ApiError(r.status, data.error ?? "error", data.message ?? data.detail?.[0]?.msg ?? `${r.status}`);

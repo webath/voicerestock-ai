@@ -15,11 +15,12 @@ interface Weakness { title: string; our_data: string; market: string; action: st
 interface Scan {
   id: string; trigger: string; started_at: string; finished_at?: string; status: "running" | "done" | "error"; error?: string;
   report?: { summary: string; price_outlook: PriceOutlook[]; competitors: Competitor[]; new_products: NewProduct[]; weaknesses: Weakness[] };
-  sources?: Source[]; searches?: number; usage?: { input_tokens: number; output_tokens: number };
+  sources?: Source[]; searches?: number; usage?: { input_tokens: number; output_tokens: number }; cost_usd?: number | null;
 }
+const usd = (v: number) => `$${v.toFixed(2)}`;
 interface MarketState {
   running: boolean; current: (Scan & { step?: string }) | null; has_credentials: boolean; model: string;
-  every_days: number; next_run_at: string | null; scan: Scan | null; history: Scan[];
+  every_days: number; next_run_at: string | null; paused?: boolean; max_searches?: number; scan: Scan | null; history: Scan[];
 }
 
 const DIR: Record<PriceOutlook["direction"], { icon: string; label: string; color: string }> = {
@@ -92,7 +93,8 @@ export default function MarketPage() {
 
       <div className="reveal grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Τελευταία έρευνα" value={scan ? when(scan.started_at) : "–"} note={scan ? TRIGGER[scan.trigger] ?? scan.trigger : "δεν έχει γίνει ακόμα"} />
-        <StatTile label="Επόμενη" value={d.every_days > 0 ? when(d.next_run_at) : "κλειστό"} note={d.every_days > 0 ? `κάθε ${d.every_days} μέρες` : "MARKET_SCAN_EVERY_DAYS=0"} />
+        <StatTile label="Επόμενη" value={d.every_days <= 0 ? "κλειστό" : d.paused ? "σε παύση" : when(d.next_run_at)}
+          note={d.every_days <= 0 ? "MARKET_SCAN_EVERY_DAYS=0" : d.paused ? "3 αποτυχίες στη σειρά — πάτα «Σκάναρε τώρα»" : `κάθε ${d.every_days} μέρες`} />
         <StatTile label="Πηγές" value={fmtNum(scan?.sources?.length ?? 0)} note={scan?.searches != null ? `${scan.searches} αναζητήσεις στο web` : undefined} />
         <StatTile label="Ευρήματα" value={rep ? fmtNum(rep.price_outlook.length + rep.competitors.length + rep.new_products.length + rep.weaknesses.length) : "–"}
           note={rep ? `${rep.weaknesses.length} αδυναμίες μας` : undefined} />
@@ -192,7 +194,7 @@ export default function MarketPage() {
             </Card>
           </div>
 
-          <Card title="Πηγές" subtitle={`${scan?.sources?.length ?? 0} σελίδες από την αναζήτηση · ${scan?.usage ? `${fmtNum(scan.usage.input_tokens + scan.usage.output_tokens)} tokens · ` : ""}${d.model}`}>
+          <Card title="Πηγές" subtitle={`${scan?.sources?.length ?? 0} σελίδες από την αναζήτηση · ${scan?.usage ? `${fmtNum(scan.usage.input_tokens + scan.usage.output_tokens)} tokens · ` : ""}${scan?.cost_usd != null ? `κόστος περίπου ${usd(scan.cost_usd)} · ` : ""}${d.model}`}>
             <ol className="space-y-1 text-sm">
               {(scan?.sources ?? []).map((s) => (
                 <li key={s.i} className="flex gap-2">
