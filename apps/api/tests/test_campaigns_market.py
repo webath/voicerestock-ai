@@ -4,7 +4,7 @@ import os
 import shutil
 import threading
 import time
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 
 import pytest
@@ -135,3 +135,27 @@ def test_market_scan_one_at_a_time(make):
     assert c.post("/api/market/scan").status_code == 409
     gate.set()
     assert wait_done(c)["scan"]["status"] == "done"
+
+
+def test_scheduler_backs_off_after_errors_and_pauses(make):
+    c = make(client=None, creds=False)
+    scanner = c.app.state.market
+    scanner.every_days = 7
+    assert scanner.next_run_at() is not None                      # καμία έρευνα ακόμα → οφείλεται τώρα
+    for i in range(market_mod.MAX_AUTO_ERRORS):
+        nxt = scanner.next_run_at()
+        assert nxt is not None
+        c.post("/api/market/scan")
+        wait_done(c)
+        if i == 0:                                                  # μετά από αποτυχία: όχι ξανά σε μία ώρα
+            due = datetime.fromisoformat(scanner.next_run_at().replace("Z", "+00:00"))
+            assert due - datetime.now(timezone.utc) > timedelta(hours=market_mod.RETRY_AFTER_ERROR_H - 1)
+    st = c.get("/api/market").json()
+    assert st["paused"] is True and st["next_run_at"] is None     # 3 συνεχόμενες αποτυχίες → σταματά μόνο του
+
+
+def test_scan_records_cost_estimate(make):
+    c = make(client=FakeClient())
+    c.post("/api/market/scan")
+    scan = wait_done(c)["scan"]
+    assert scan["cost_usd"] is not None and scan["cost_usd"] > 0 and scan["usage"]["cache_read_input_tokens"] == 0

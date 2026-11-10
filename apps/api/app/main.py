@@ -18,6 +18,7 @@ from functools import lru_cache
 import pandas as pd
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Literal
 
@@ -27,6 +28,7 @@ from . import assistant as ai
 from .activity import operations, trace
 from .agent import AgentRunner
 from .campaigns import Campaigns
+from .contacts import MODES, Contacts
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
 from .explain import explain
 from .market import MarketScanner
@@ -107,6 +109,20 @@ class CallEvent(BaseModel):
     erp_draft_id: str | None = None
 
 
+class ContactBody(BaseModel):
+    phone: str | None = Field(None, max_length=30)
+    email: str | None = Field(None, max_length=120)
+
+
+class ContactsImport(BaseModel):
+    csv: str = Field(max_length=60_000)
+
+
+class ContactsMode(BaseModel):
+    mode: str
+    confirm: bool = False               # το «live» στέλνει σε πραγματικούς πελάτες → θέλει ρητή επιβεβαίωση
+
+
 class FocusBody(BaseModel):
     salesman: int
 
@@ -118,13 +134,17 @@ class SimulateBody(BaseModel):
 
 def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent: AgentRunner | None = None,
                market: MarketScanner | None = None, campaign_state: outreach.CampaignState | None = None,
-               sms: outreach.Apifon | None = None, sim_pace: float | None = None) -> FastAPI:
+               sms: outreach.Apifon | None = None, sim_pace: float | None = None,
+               contacts: Contacts | None = None) -> FastAPI:
     app = FastAPI(title="VORA App API")
+    app.add_middleware(GZipMiddleware, minimum_size=2000)   # /api/suggestions: 670 KB → ~60 KB (το SSE εξαιρείται)
     # Μόνο το dashboard μιλά στο API από browser· ο voice agent είναι server-to-server (χωρίς CORS).
     app.add_middleware(CORSMiddleware, allow_origins=allowed_origins(), allow_methods=["GET", "POST", "PUT", "OPTIONS"],
                        allow_headers=["Content-Type", "X-Actor"])
     app.add_middleware(SecurityMiddleware)          # εξωτερικό στρώμα: Host, Origin, X-Actor, μέγεθος, ρυθμός, headers
     app.state.store = store or Store()
+    app.state.contacts = contacts or Contacts()
+    K = lambda: app.state.contacts  # noqa: E731
     app.state.erp = erp or MockERPAdapter()
     app.state.explanations = {}
     app.state.ai_cache = {}
@@ -168,9 +188,8 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
 
     @app.get("/api/salesmen")
     def salesmen():
-        df = pd.read_csv(ROOT / "team_pack" / "data" / "PRSN.csv", encoding="utf-8-sig")
-        return [{"PRSN": int(r.PRSN), "NAME": r.NAME, "phone": os.environ.get(f"SALESMAN_{int(r.PRSN)}_PHONE")}
-                for r in df.itertuples()]
+        return [{"PRSN": prsn, "NAME": name, "phone": os.environ.get(f"SALESMAN_{prsn}_PHONE")}
+                for prsn, name in _salesman_names().items()]
 
     @app.get("/api/suggestions")
     def suggestions(salesman: int | None = None, status: str | None = None, x_actor: str = Header("unknown")):
@@ -222,14 +241,62 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
 
     @app.get("/api/customers")
     def customers():
-        return [_customer_out(c) for c in _customers().values()]
+        return [{**_customer_out(c), "contact": K().public(t)} for t, c in _customers().items()]
 
     @app.get("/api/customers/{trdr}")
     def customer(trdr: int):
         c = _customers().get(trdr)
         if not c:
             raise ApiError(404, "not_found", "customer not found")
-        return _customer_out(c)
+        return {**_customer_out(c), "contact": K().public(trdr)}
+
+    # ---------------- επαφές πελατών (κινητό/email από τον χρήστη· app/contacts.py) ----------------
+    def contacts_state() -> dict:
+        demo = os.environ.get("SMS_DEMO_TO", "").strip()
+        return {**K().summary(len(_customers())), "demo_to": outreach.mask(outreach._digits(demo)) if demo else None}
+
+    @app.get("/api/contacts")
+    def contacts_summary():
+        return contacts_state()
+
+    @app.put("/api/contacts/mode")
+    def contacts_mode(body: ContactsMode, x_actor: str = Header("unknown")):
+        if body.mode not in MODES:
+            raise ApiError(400, "bad_request", "mode: demo ή live")
+        if body.mode == "live":
+            if not body.confirm:
+                raise ApiError(400, "confirm_required", "το «live» στέλνει SMS σε πραγματικούς πελάτες — θέλει confirm")
+            if not K().summary(0)["with_phone"]:
+                raise ApiError(409, "no_contacts", "δεν υπάρχει κανένα κινητό πελάτη — ανέβασε πρώτα επαφές")
+        K().set_mode(body.mode)
+        S().audit(x_actor, "sms_mode", None, body.mode)
+        return contacts_state()
+
+    @app.post("/api/contacts/import")
+    def contacts_import(body: ContactsImport, x_actor: str = Header("unknown")):
+        try:
+            rep = K().import_csv(body.csv, _customers(), x_actor)
+        except ValueError as e:
+            raise ApiError(400, "bad_csv", str(e))
+        S().audit(x_actor, "contacts_import", None, f"{rep['imported']} επαφές, {rep['error_count']} άκυρες γραμμές")
+        return {**rep, **contacts_state()}
+
+    @app.post("/api/contacts/clear")
+    def contacts_clear(x_actor: str = Header("unknown")):
+        n = K().clear()
+        S().audit(x_actor, "contacts_clear", None, f"{n} επαφές")
+        return contacts_state()
+
+    @app.put("/api/contacts/{trdr}")
+    def contact_set(trdr: int, body: ContactBody, x_actor: str = Header("unknown")):
+        if trdr not in _customers():
+            raise ApiError(404, "not_found", "customer not found")
+        try:
+            out = K().set(trdr, x_actor, **body.model_dump(include=body.model_fields_set))   # ό,τι δεν στάλθηκε μένει
+        except ValueError as e:
+            raise ApiError(400, "bad_contact", str(e))
+        S().audit(x_actor, "contact", None, f"{trdr}: κινητό {'ναι' if out['phone'] else 'όχι'}, email {'ναι' if out['email'] else 'όχι'}")
+        return out
 
     @app.get("/api/forecasts")
     def forecasts(trdr: int):
@@ -460,7 +527,8 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
         r = campaigns_view()
         demo = os.environ.get("SMS_DEMO_TO", "").strip()
         r["sms"] = {"configured": app.state.sms.configured, "sender": app.state.sms.sender,
-                    "demo_to": outreach.mask(outreach._digits(demo)) if demo else None}
+                    "demo_to": outreach.mask(outreach._digits(demo)) if demo else None, **K().summary(len(_customers()))}
+        r["emails"] = {t: c["email"] for t, c in K().data["contacts"].items() if c.get("email")}
         return r
 
     @app.put("/api/campaigns/prices/{mtrl}")
@@ -495,10 +563,11 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
             raise ApiError(400, "bad_request", str(e))
 
     def sms_route(trdr: int) -> dict:
-        number, source = outreach.phone_for(trdr)
+        number, source = outreach.phone_for(trdr, K())
         reason = (None if number and app.state.sms.configured else
                   "Λείπουν τα στοιχεία Apifon (APIFON_TOKEN, APIFON_SECRET)." if number else
-                  f"Δεν υπάρχει κινητό για τον πελάτη — CUSTOMER_{trdr}_PHONE ή SMS_DEMO_TO στο .env.")
+                  "Λειτουργία demo χωρίς demo κινητό — βάλε SMS_DEMO_TO στο .env." if K().mode == "demo" else
+                  "Δεν υπάρχει κινητό για αυτόν τον πελάτη — πρόσθεσέ το στη σελίδα Πελάτες.")
         return {"number": number, "to": outreach.mask(number), "phone_source": source, "can_send": reason is None, "reason": reason}
 
     @app.post("/api/campaigns/sms/draft")

@@ -15,17 +15,18 @@
 5. `team_pack/README_challenge.md` — η επίσημη περιγραφή (**υπερισχύει** όλων των παραπάνω)
 6. `docs/challenge/*.pdf` — deck της Revival + master spec (σκεπτικό, όχι υποχρεωτικό)
 
-## Ποιος είσαι / σε ποιον φάκελο δουλεύεις
+## Κατάσταση & ποιος γράφει πού
 
-Ρώτα τον χρήστη αν δεν είναι σαφές αν είναι ο **Δημήτρης** ή ο **Νίκος**, και μείνε στους φακέλους του:
+Ο διαγωνισμός **τελείωσε (8/11/2026)**. Το project τρέχει τοπικά με `./scripts/start.sh`· ο voice agent στο VPS είναι κλειστός.
+Η αυστηρή ιδιοκτησία φακέλων του hackathon δεν ισχύει πια: αλλάζεις ό,τι χρειάζεται, **πάντα σε branch + PR**
+(`nikos/...` ή `dimitris/...`) και ποτέ κατευθείαν στο `main`. Ποιος ξέρει καλύτερα τι:
 
-| Developer | Φάκελοι που γράφει |
+| Κομμάτι | Ποιος το έγραψε |
 |---|---|
-| Δημήτρης (data, backend & dashboard) | `services/forecast/`, `apps/api/`, `apps/web/`, `submissions/`, `docs/RESULTS.md` |
-| Νίκος (voice agent) | `apps/voice/`, `scripts/mock_app_api.py` (το dashboard έχει ήδη σελίδα `/voice` που διαβάζει τα events του) |
-| Κοινά (μόνο με συνεννόηση) | `docs/CONTRACTS.md`, `fixtures/`, `docs/PLAN.md` (checkboxes ελεύθερα), `docs/DEMO.md`, `README.md` |
+| `services/forecast/`, `apps/api/` (πυρήνας: store, agent, assistant, security, simulate), `apps/web/` (βάση), `submissions/`, `docs/RESULTS.md` | Δημήτρης |
+| `apps/voice/`, `scripts/mock_app_api.py`, Campaigns / Market Scan / SMS / επαφές (`apps/api/app/{campaigns,market,outreach,contacts}.py`, σελίδες `/campaigns`, `/market`) | Νίκος |
 
-Αν μια αλλαγή χρειάζεται να αγγίξει φάκελο του άλλου ή τα contracts: **σταμάτα και πες το στον χρήστη** αντί να το κάνεις.
+Αλλαγή σε `docs/CONTRACTS.md` ή `fixtures/` = αλλαγή στο σημείο επαφής voice ↔ API: τρέξε `python3 scripts/check_voice_vs_api.py`.
 
 ## Αμετάβλητοι κανόνες
 
@@ -42,10 +43,11 @@
 ## Πώς τρέχει
 
 ```bash
-python3 team_pack/mock_erp_server.py        # Mock ERP :8080
-python3 scripts/mock_app_api.py             # Mock App API :8000 (μέχρι να υπάρξει το apps/api)
+./scripts/start.sh             # όλα: Mock ERP :8080 → agent → App API :8000 → dashboard :3000 (Ctrl+C τα κλείνει)
+./scripts/dev_backend.sh       # μόνο το backend (για `npm run dev` στο apps/web)
+python3 scripts/mock_app_api.py   # mock του App API πάνω σε fixture (ανάπτυξη voice χωρίς backend)
 ```
-Τα υπόλοιπα (forecast, api, web, voice) έχουν οδηγίες στο README του φακέλου τους. Όταν προσθέτεις εντολή, ενημέρωσε το README.
+Τα υπόλοιπα έχουν οδηγίες στο README του φακέλου τους. Όταν προσθέτεις εντολή, ενημέρωσε το README.
 
 ## Συνήθειες
 
@@ -53,4 +55,4 @@ python3 scripts/mock_app_api.py             # Mock App API :8000 (μέχρι ν�
 - Όταν τελειώνει ένα κουτάκι του `docs/PLAN.md`, τσέκαρέ το (`[x]`) στο ίδιο commit — έτσι ο άλλος ξέρει πού είμαστε.
 - Τρέχε τα tests του φακέλου σου πριν από κάθε push.
 - Γλώσσα: κώδικας/identifiers στα αγγλικά, UI/φωνή/docs στα ελληνικά.
-- Προτεραιότητα όταν πιέζει ο χρόνος: submission > ERP drafts > dashboard > ακρίβεια > voice polish.
+- Προσωπικά δεδομένα (κινητά/email πελατών) μένουν μόνο στο `data/processed/` (gitignored)· ποτέ σε fixture, test ή log.
