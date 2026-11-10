@@ -290,6 +290,8 @@ class CallWatch(FrameProcessor):
     async def process_frame(self, frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, BotStartedSpeakingFrame):
+            if self._session:
+                self._session.note_agent_started()
             self._state["spoke"] = True
             m = self._state["m"]
             m["speaking"], m["bot_start"] = True, time.monotonic()
@@ -302,17 +304,18 @@ class CallWatch(FrameProcessor):
         elif isinstance(frame, TTSTextFrame):
             self._said.append(frame.text)
             self._spaces = getattr(frame, "includes_inter_frame_spaces", False)
-        elif isinstance(frame, BotStoppedSpeakingFrame) and self._state["m"]["speaking"]:
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             m = self._state["m"]
-            m["speaking"] = False
-            m["turns"].append(time.monotonic() - m["bot_start"])  # διάρκεια ατάκας
-        if isinstance(frame, BotStoppedSpeakingFrame) and self._said:
+            if m["speaking"]:
+                m["speaking"] = False
+                m["turns"].append(time.monotonic() - m["bot_start"])
             said = " ".join(("" if self._spaces else " ").join(self._said).split())
             self._said.clear()
-            logger.info(f"{self._tag} Agent: {said}" if LOG_TRANSCRIPTS else f"{self._tag} Agent μίλησε ({len(said)} χαρ.)")
             if self._session:
-                self._session.note_agent(said)   # φύλακας: ολοκληρωμένη περίληψη;
-            self._post(type="transcript", role="agent", text=said)
+                self._session.note_agent(said)  # reset του guard ακόμη και χωρίς TTSText
+            if said:
+                logger.info(f"{self._tag} Agent: {said}" if LOG_TRANSCRIPTS else f"{self._tag} Agent μίλησε ({len(said)} χαρ.)")
+                self._post(type="transcript", role="agent", text=said)
         await self.push_frame(frame, direction)
 
 

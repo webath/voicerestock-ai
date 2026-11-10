@@ -24,6 +24,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, StrictInt
 
 from . import assistant as ai
+from .activity import operations, trace
 from .agent import AgentRunner
 from .campaigns import Campaigns
 from .erp import ERPAdapter, MockERPAdapter, to_erp_payload
@@ -142,10 +143,11 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
         changed = S().reload_if_changed()
         if changed:
             app.state.explanations.clear()
-        n = len(S().all())
+        n = sum(s.get("forecast_active", True) for s in S().all())
+        changes = S().changes()
         S().audit("agent", "agent_run", None, f"{run.get('id')}: {'νέες προτάσεις' if changed else 'χωρίς αλλαγές'}")
-        return {"reloaded": changed, "suggestions": n,
-                "detail": (f"{n} νέες προτάσεις στο dashboard και στον voice agent" if changed else
+        return {"reloaded": changed, "suggestions": n, "changes": changes,
+                "detail": (f"{changes.get('new', 0)} νέες, {changes.get('changed', 0)} αλλαγμένες, {changes.get('withdrawn', 0)} αποσύρθηκαν. Ιστορικό και drafts διατηρήθηκαν" if changed else
                            f"Οι {n} προτάσεις δεν άλλαξαν — εγκρίσεις και drafts μένουν ως έχουν")
                           + " · draft στο ERP μόνο όταν εγκρίνει ο πωλητής"}
 
@@ -183,6 +185,16 @@ def create_app(store: Store | None = None, erp: ERPAdapter | None = None, agent:
     @app.get("/api/suggestions/{sid}")
     def suggestion(sid: str):
         return must_get(sid)
+
+    @app.get("/api/suggestions/{sid}/trace")
+    def suggestion_trace(sid: str):
+        with S().lock:
+            return trace(must_get(sid), S().audit_log(1000, sid), S().calls())
+
+    @app.get("/api/operations")
+    def operation_metrics():
+        with S().lock:
+            return operations(S().all(), S().calls(), S().changes())
 
     @app.get("/api/suggestions/{sid}/explanation")
     def explanation(sid: str):

@@ -6,7 +6,9 @@ import {
   EmptyState, ErrorBox, FilterBar, Loading, Meter, PageHeader, PriorityBadge, Segmented, Select, StatusBadge,
 } from "@/components/ui";
 import { byPriority, priorityOf, priorityReason, type Priority } from "@/lib/priority";
-import { ApiError, apiPost, useApi, type Salesman, type Suggestion } from "@/lib/api";
+import { ApiError, apiPost, useApi, type Operations, type Salesman, type Suggestion } from "@/lib/api";
+import { OperationsSummary } from "@/components/OperationsSummary";
+import { OrderTrace } from "@/components/OrderTrace";
 import { useToast } from "@/components/Toast";
 import { fmtDay, fmtDayLong, fmtEur, fmtEur2, fmtNum } from "@/lib/format";
 
@@ -17,6 +19,7 @@ export function OrdersView() {
   const params = useSearchParams();
   const sugs = useApi<Suggestion[]>("/api/suggestions");
   const salesmen = useApi<Salesman[]>("/api/salesmen");
+  const operations = useApi<Operations>(params.get("changed") === "1" ? "/api/operations" : null);
   const [tab, setTab] = useState<Tab>("todo");
   const [salesman, setSalesman] = useState("");
   const [q, setQ] = useState("");
@@ -34,6 +37,7 @@ export function OrdersView() {
     (tab === "all" || (tab === "todo" ? TODO.includes(s.status) : s.status === "draft_created"))
     && (!salesman || String(s.SALESMAN) === salesman)
     && (!level || priorityOf(s).priority === level)
+    && (params.get("changed") !== "1" || !!operations.data?.changes.ids?.includes(s.id))
     && (!needle || `${s.CUSTOMER_NAME} ${s.LINES.map((l) => l.ITEM_NAME).join(" ")}`.toLowerCase().includes(needle)))
     // η παραγγελία από link πρώτη· μετά κρίσιμες → επείγουσες → πιθανή απώλεια → …, μέσα σε κάθε επίπεδο κατά αξία
     .sort((a, b) => Number(b.id === openId) - Number(a.id === openId) || byPriority(a, b));
@@ -48,6 +52,8 @@ export function OrdersView() {
     <>
       <PageHeader title="Προτεινόμενες παραγγελίες"
         subtitle="Έλεγξε ποσότητες και στείλε τις παραγγελίες ως draft στο ERP. Τίποτα δεν γίνεται τελική παραγγελία χωρίς έγκριση." />
+      <OperationsSummary />
+      {params.get("changed") === "1" && <p className="mb-4 text-sm text-ink-2">Νέες και αλλαγμένες προτάσεις της τελευταίας ανανέωσης. <Link href="/orders" className="underline underline-offset-4">Εμφάνιση όλων</Link>{operations.error && <span role="alert"> · Δεν φορτώθηκαν οι αλλαγές. Ανανέωσε τη σελίδα.</span>}</p>}
       <FilterBar>
         <Segmented label="Κατάσταση" value={tab} onChange={setTab}
           options={[{ value: "todo", label: `Προς έγκριση · ${counts.todo}` }, { value: "done", label: `Στο ERP · ${counts.done}` }, { value: "all", label: "Όλες" }]} />
@@ -150,6 +156,8 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
               <span>{s.CUSTOMER_CATEGORY} · {s.AREA} · Πωλητής: {s.SALESMAN_NAME}</span>
               <Link href={`/customers/${s.TRDR}`} className="text-ink-2 hover:text-ink">Ιστορικό & εξήγηση →</Link>
             </div>
+            {s.forecast_active === false && <p className="mb-3 text-sm text-ink-2">Δεν περιλαμβάνεται στην τρέχουσα πρόβλεψη. Διατηρείται στο ιστορικό.</p>}
+            {s.forecast_update_available && <p className="mb-3 text-sm text-ink-2">Υπάρχει νεότερη πρόβλεψη. Το προηγούμενο αποτέλεσμα διατηρήθηκε· χρειάζεται έλεγχος από τον πωλητή.</p>}
             <div className="overflow-x-auto">
               <table className="data">
                 <thead><tr><th>Είδος</th><th className="hidden sm:table-cell">Τελειώνει</th><th className="hidden sm:table-cell">Confidence</th><th className="num">Ποσότητα</th><th className="num hidden md:table-cell">Αξία</th></tr></thead>
@@ -202,6 +210,7 @@ function OrderCard({ s, defaultOpen, onChange }: { s: Suggestion; defaultOpen: b
                 </div>
               )}
             </div>
+            {open && <OrderTrace suggestion={s} />}
           </div>
         </div>
       </div>

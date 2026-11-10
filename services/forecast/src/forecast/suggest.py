@@ -92,12 +92,13 @@ def evidence(d: Data, row, cold: bool, peer: str | None) -> dict:
         factors.append({"name": "seasonality", "impact_days": _r(impact, 1),
                         "source": "ίδια περίοδος πέρσι × φετινή τάση" if row.has_ly else "εποχικός δείκτης κατηγορίας × περιοχής"})
     if not math.isnan(row.interval):
-        src = (f"αγοράζει κάθε ~{int(round(row.interval))} μέρες (διάμεσος 180 ημερών)" if not row.cold_pair
+        src = (f"αγοράζει κάθε ~{int(round(row.interval))} μέρες (διάμεσος {int(row.interval_window_days)} ημερών)" if not row.cold_pair
                else f"νέος πελάτης: κύκλος ~{int(round(row.interval))} μερών από παρόμοιους πελάτες")
         factors.append({"name": "purchase_cycle", "impact_days": None, "source": src})
     if row.last_in_promo and row.interval_used > row.interval:
+        multiplier = f"{row.promo_cycle_multiplier:.2f}".replace(".", ",")
         factors.append({"name": "promo_stockpile", "impact_days": _r(row.interval_used - row.interval, 1),
-                        "source": "η τελευταία αγορά έγινε σε προσφορά — στο ιστορικό, μετά από προσφορά ο πελάτης ξαναγοράζει σε ~1,8× τον κανονικό κύκλο (κάνει απόθεμα)"})
+                        "source": f"η τελευταία αγορά έγινε σε προσφορά — ο κύκλος προσαρμόστηκε σε ~{multiplier}× από ολοκληρωμένα ιστορικά διαστήματα, με συντηρητική εκτίμηση όταν τα δεδομένα είναι λίγα"})
     warnings = []
     if cold:
         warnings.append("νέος πελάτης με λίγο ιστορικό")

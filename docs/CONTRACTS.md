@@ -175,3 +175,27 @@ proposed|modified ──▶ cancelled
 | POST | `/voice/status` | Twilio (signature verified) |
 | WS | `/voice/ws` | Twilio ConversationRelay |
 | GET | `/voice/health` | – |
+
+## Agent reliability & activity (7/11)
+
+Η ανανέωση forecast γίνεται ανά `Suggestion.id`, σε συναλλαγή SQLite. Δεν καλεί admin reset:
+- Ίδια πρόβλεψη: διατηρούνται version, ποσότητες, status και tokens, ακόμη και αν αλλάξει η μορφοποίηση JSON.
+- Αλλαγμένη ανοιχτή πρόταση: `version + 1`, νέα έγκριση. Χειροκίνητες ποσότητες διατηρούνται μόνο για ίδιο πωλητή/είδος και εντός των νέων ορίων.
+- `draft_created`, `posting`, ρητό `cancelled`: διατηρούνται μαζί με idempotency και ιστορικό. Αν υπάρχει νέα πρόβλεψη, `forecast_update_available: true`· δεν ξαναγράφεται αυτόματα draft.
+- Αποσυρμένη ανοιχτή πρόταση: `cancelled`, `forecast_withdrawn: true`, `forecast_active: false`, tokens άκυρα. Διατηρείται στο ιστορικό. Αν επανεμφανιστεί απαιτείται νέα version/έγκριση.
+- `POST /api/admin/reset` παραμένει ρητά καταστροφικό demo reset.
+
+Προαιρετικά πεδία Suggestion: `forecast_active`, `forecast_update_available`, `forecast_withdrawn` (boolean).
+
+`GET /api/operations`:
+```json
+{"open":2,"drafts":1,"modified_drafts":1,"draft_value_eur":412.8,"calls":1,"timed_calls":1,"average_call_seconds":60.0,"changes":{"new":1,"changed":0,"unchanged":1,"withdrawn":0,"handled":0,"at":"2026-11-07T10:00:00Z","ids":["SUG-1004-001"]},"value_basis":"Καθαρή αξία drafts σε τιμές καταλόγου. Δεν είναι πραγματοποιημένος τζίρος ή εξοικονόμηση."}
+```
+Οι τιμές εδώ είναι παράδειγμα σχήματος, όχι αποτελέσματα. `average_call_seconds: null` όταν δεν υπάρχουν έγκυρα start/end. `changes: {}` πριν από τον πρώτο συγχρονισμό. Οι μετρήσεις καλύπτουν το διατηρημένο state από το τελευταίο demo reset, όχι αυθαίρετα ημερήσια σύνολα.
+
+`GET /api/suggestions/{id}/trace`: `{suggestion_id,status,erp_draft_id,evidence,events}`.
+- `evidence`: ανά είδος `{MTRL,ITEM_NAME,UNIT,QTY_RECOMMENDED,QTY1,PREDICTED_DEPLETION_DATE,evidence}`.
+- `events`: χρονολογικά `{at,actor,action,outcome,snapshot}`. Snapshot = Suggestion τη στιγμή του event ή null για παλιές καταγραφές/φωνητική επιβεβαίωση. Δεν εκτίθενται tokens.
+- Audit events `forecast_created`, `forecast_updated`, `forecast_withdrawn` και υπάρχοντα quantity/confirm/create-draft/cancel.
+- Call transcript entries διατηρούν προαιρετικά `suggestion_id` και `type`. `type: confirmation`, `role: user` καταγράφει την απάντηση που πέρασε τον έλεγχο της φωνής, πριν το confirm/create-draft. Δεν αποδεικνύει από μόνο του επιτυχημένο ERP write.
+- Το mock υποστηρίζει και τα δύο read endpoints με τα δικά του δεδομένα. Δεν τρέχει forecast reconciliation· `changes: {}`.

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .ingest import Data
+from .promo import adaptive_promo_multiplier
 
 
 def _last_buy(h: pd.DataFrame) -> pd.DataFrame:
@@ -111,8 +112,10 @@ CFG = {"cold_rate": "cycle",          # "window": qty/90 μέρες · "cycle": 
        "peer_cold_start": True,         # cold start: κύκλος από πελάτες ίδιου τύπου για το ίδιο είδος
        "qty_scaled_cadence": "promo",   # "off" | "promo" (μόνο αν η τελευταία αγορά ήταν σε προσφορά) | "all" — αγνοείται αν promo_cycle_mult
        "promo_cycle_mult": 1.8,         # αριθμός: κύκλος μετά από αγορά σε προσφορά = διάστημα × αυτό (αντί για κλιμάκωση ποσότητας)
+       "adaptive_promo": True,          # v4: κατηγορία → πελάτης/είδος, μόνο από ολοκληρωμένα ιστορικά διαστήματα
        "interval_excl_promo": False,    # διάμεσο διάστημα μόνο από διαστήματα που ΔΕΝ ξεκινούν από αγορά σε προσφορά
-       "interval_stat": "median",       # "median" (180 μέρες) | "recent4": διάμεσος 4 τελευταίων διαστημάτων | "mean" | "blend"
+       "interval_stat": "median",       # "median" (cadence_days) | "recent4": διάμεσος 4 τελευταίων διαστημάτων | "mean" | "blend"
+       "cadence_days": 365,              # v5: σταθερός κύκλος σε 365 μέρες, πρόσφατες ποσότητες/μεταβλητότητα παραμένουν 180
        "overdue_floor": 3,              # αν ο κύκλος έχει ήδη περάσει: επόμενη αγορά το νωρίτερο cutoff + τόσες μέρες
        "interval_beta": 1.0,            # <1: ήπια συρρίκνωση της κλίμακας κύκλου προς 14 μέρες (κύκλος × (14/κύκλος)^(1−β))
        "shift_days": 3.0,               # εξάντληση = πρόβλεψη επόμενης αγοράς + shift_days + shift_frac × κύκλος
@@ -167,6 +170,10 @@ def _cadence_frame(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) 
     stat = CFG.get("interval_stat", "median")
     if stat == "median":
         iv_est = grp.median()
+        if CFG.get("cadence_days", 180) != 180 and not CFG.get("interval_excl_promo"):
+            # Με λίγες πρόσφατες αγορές αξιοποιείται και η προηγούμενη ενεργή σεζόν.
+            longer = _pair_intervals(h, c, days=CFG["cadence_days"]).set_index(["TRDR", "MTRL"])["interval"]
+            iv_est = longer.reindex(iv_est.index).combine_first(iv_est)
     elif stat == "mean":
         iv_est = grp.mean()
     elif stat == "blend":
@@ -182,14 +189,19 @@ def _cadence_frame(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp) 
     last = buys.loc[buys.groupby(["TRDR", "MTRL"])["DATE"].idxmax()]
     lp = last.set_index(["TRDR", "MTRL"])["in_promo"].rename("last_in_promo") if "in_promo" in last else None
     x = tg.merge(stats, how="left").merge(_last_buy(h), how="left")
+    x["interval_window_days"] = CFG.get("cadence_days", 180)
     x["last_in_promo"] = (x.set_index(["TRDR", "MTRL"]).index.map(lp).fillna(False).astype(bool)) if lp is not None else False
     if CFG["peer_cold_start"]:
         x["interval"] = x["interval"].fillna(pd.Series(peer_interval(d, h, tg, c), index=x.index))
     beta = CFG.get("interval_beta", 1.0)
     x["interval_used"] = x["interval"] * (14.0 / x["interval"]) ** (1 - beta)
     mode = CFG["qty_scaled_cadence"]
+    x["promo_cycle_multiplier"] = float(CFG.get("promo_cycle_mult") or 1.0)
     if CFG.get("promo_cycle_mult"):
-        x.loc[x["last_in_promo"], "interval_used"] = x.loc[x["last_in_promo"], "interval_used"] * CFG["promo_cycle_mult"]
+        if CFG.get("adaptive_promo", False):
+            x["promo_cycle_multiplier"] = adaptive_promo_multiplier(
+                h, d.items, _pair_intervals(h, c, days=CFG.get("cadence_days", 180)), tg, c, fallback=CFG["promo_cycle_mult"])
+        x.loc[x["last_in_promo"], "interval_used"] *= x.loc[x["last_in_promo"], "promo_cycle_multiplier"]
     elif mode != "off":
         scale = (x["last_qty"] / x["qty_normal_median"].fillna(x["qty_recent_median"])).clip(0.5, 3).fillna(1.0)
         apply = x["last_in_promo"] if mode == "promo" else pd.Series(True, index=x.index)
@@ -212,7 +224,7 @@ def components(d: Data, h: pd.DataFrame, tg: pd.DataFrame, c: pd.Timestamp, w_ca
     """Όλα τα ενδιάμεσα του hybrid (για evidence / suggestions). Η στήλη DATE είναι η πρόβλεψη."""
     y = _yoy_frame(d, h, tg, c).rename(columns={"DATE": "date_yoy"})
     k = _cadence_frame(d, h, tg, c)[["TRDR", "MTRL", "DATE", "interval", "interval_used", "interval_cv", "n_recent",
-                                      "qty_recent_median", "qty_recent_max", "last_in_promo"]].rename(columns={"DATE": "date_cadence"})
+                                      "qty_recent_median", "qty_recent_max", "last_in_promo", "promo_cycle_multiplier", "interval_window_days"]].rename(columns={"DATE": "date_cadence"})
     x = y.merge(k, on=["TRDR", "MTRL"], how="left")
     yd = (x["date_yoy"] - c).dt.days
     kd = (x["date_cadence"] - c).dt.days.fillna(yd)
@@ -246,16 +258,18 @@ def with_cfg(fn, name: str, **over):
 
 
 # v2 = submission της 6/11: κλιμάκωση κύκλου με την ποσότητα της προσφοράς, χωρίς ελάχιστο, χωρίς μετατόπιση, βάρος 0,7
-V2 = {"promo_cycle_mult": None, "overdue_floor": 1, "shift_days": 0.0}
+V2 = {"promo_cycle_mult": None, "overdue_floor": 1, "shift_days": 0.0, "adaptive_promo": False, "cadence_days": 180}
 
 REGISTRY = {
     "cutoff+30": cutoff_plus_30,
     "baseline_180": baseline_180,
     "seasonal_group": seasonal_group,
     "seasonal_yoy": seasonal_yoy,
-    "cadence": cadence,
+    "cadence": with_cfg(cadence, "cadence", adaptive_promo=False, cadence_days=180),
     "hybrid_v2": with_cfg(hybrid(0.7), "hybrid_v2", **V2),
-    "hybrid_v3": hybrid(W_CADENCE),
+    "hybrid_v3": with_cfg(hybrid(W_CADENCE), "hybrid_v3", adaptive_promo=False, cadence_days=180),
+    "hybrid_v4": with_cfg(hybrid(W_CADENCE), "hybrid_v4", adaptive_promo=True, cadence_days=180),
+    "hybrid_v5": with_cfg(hybrid(W_CADENCE), "hybrid_v5", adaptive_promo=True, cadence_days=365),
 }
 
-DEFAULT_MODEL = "hybrid_v3"
+DEFAULT_MODEL = "hybrid_v5"
